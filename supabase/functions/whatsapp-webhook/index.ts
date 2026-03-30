@@ -16,6 +16,16 @@ const WAPI_BASE = "https://gate.whapi.cloud";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+// Working hours per weekday (matches src/lib/workingHours.ts)
+// Mo-Do: 8.5h, Fr: 5.0h (inkl. 0.5h ZA-Überstunde), Sa-So: 0h
+function getRegelarbeitszeit(date: Date = new Date()): number {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return 0;    // Weekend
+  if (day >= 1 && day <= 4) return 8.5;    // Mo-Do
+  if (day === 5) return 5.0;              // Fr (inkl. 0.5h Überstunde)
+  return 0;
+}
+
 // ─── Types ───────────────────────────────────────────────
 
 interface ConversationEntry {
@@ -41,36 +51,53 @@ async function sendWhatsApp(to: string, message: string) {
 }
 
 async function downloadMedia(mediaUrl: string): Promise<ArrayBuffer> {
-  console.log("Downloading media from:", mediaUrl);
+  console.log("Downloading media:", mediaUrl);
 
-  // If it's a WAPI media ID (not a URL), fetch via WAPI media endpoint
   if (!mediaUrl.startsWith("http")) {
     const apiUrl = `${WAPI_BASE}/media/${mediaUrl}`;
     const res = await fetch(apiUrl, {
       headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
     });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`WAPI media download failed (${res.status}): ${errText}`);
-    }
+    if (!res.ok) throw new Error(`WAPI media failed (${res.status})`);
     return res.arrayBuffer();
   }
 
-  // Direct URL download - try with and without auth
   let res = await fetch(mediaUrl, {
     headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
   });
-
-  if (!res.ok) {
-    // Retry without auth (some WAPI URLs are public)
-    res = await fetch(mediaUrl);
-  }
-
-  if (!res.ok) {
-    throw new Error(`Media download failed (${res.status}): ${mediaUrl}`);
-  }
-
+  if (!res.ok) res = await fetch(mediaUrl);
+  if (!res.ok) throw new Error(`Media download failed (${res.status})`);
   return res.arrayBuffer();
+}
+
+// ─── Speech-to-Text via OpenAI Whisper ───────────────────
+
+async function transcribeAudio(audioUrl: string): Promise<string> {
+  console.log("Transcribing audio:", audioUrl);
+
+  const audioBuffer = await downloadMedia(audioUrl);
+  const blob = new Blob([audioBuffer], { type: "audio/ogg" });
+
+  const formData = new FormData();
+  formData.append("file", blob, "voice.ogg");
+  formData.append("model", "whisper-1");
+  formData.append("language", "de");
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openaiKey}` },
+    body: formData,
+  });
+
+  const result = await res.json();
+
+  if (!res.ok) {
+    console.error("Whisper error:", result);
+    throw new Error("Spracherkennung fehlgeschlagen");
+  }
+
+  console.log("Transcribed:", result.text);
+  return result.text;
 }
 
 // ─── Employee lookup ─────────────────────────────────────
@@ -130,7 +157,7 @@ async function saveMsg(
   });
 }
 
-// ─── Rich context for GPT ────────────────────────────────
+// ─── Rich context ────────────────────────────────────────
 
 async function gatherContext(userId: string) {
   const today = new Date().toISOString().split("T")[0];
@@ -142,28 +169,17 @@ async function gatherContext(userId: string) {
 
   const [projectsRes, todayEntriesRes, assignmentsRes, recentEntriesRes] =
     await Promise.all([
-      supabase
-        .from("projects")
-        .select("id, name")
-        .eq("status", "aktiv")
-        .order("name"),
-      supabase
-        .from("time_entries")
+      supabase.from("projects").select("id, name").eq("status", "aktiv").order("name"),
+      supabase.from("time_entries")
         .select("id, stunden, taetigkeit, project_id, projects(name), created_at")
-        .eq("user_id", userId)
-        .eq("datum", today)
+        .eq("user_id", userId).eq("datum", today)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("worker_assignments")
+      supabase.from("worker_assignments")
         .select("project_id, projects(name)")
-        .eq("worker_id", userId)
-        .eq("date", today),
-      supabase
-        .from("time_entries")
+        .eq("worker_id", userId).eq("date", today),
+      supabase.from("time_entries")
         .select("datum, stunden, taetigkeit, projects(name)")
-        .eq("user_id", userId)
-        .order("datum", { ascending: false })
-        .limit(7),
+        .eq("user_id", userId).order("datum", { ascending: false }).limit(7),
     ]);
 
   const projects = projectsRes.data || [];
@@ -174,9 +190,13 @@ async function gatherContext(userId: string) {
   const todayHours = todayEntries.reduce(
     (sum: number, e: any) => sum + (e.stunden || 0), 0
   );
+  const dailyTarget = getRegelarbeitszeit();
+  const remainingHours = Math.max(0, dailyTarget - todayHours);
 
   let ctx = `DATUM HEUTE: ${today} (${dayName})\n`;
+  ctx += `REGELARBEITSZEIT HEUTE: ${dailyTarget}h (${dayName === "Freitag" ? "Freitag = kuerzerer Tag" : "Mo-Do"})\n`;
   ctx += `HEUTE BEREITS GEBUCHT: ${todayHours}h\n`;
+  ctx += `NOCH OFFEN HEUTE: ${remainingHours}h\n`;
 
   if (todayEntries.length > 0) {
     ctx += `\nHEUTIGE BUCHUNGEN:\n`;
@@ -193,7 +213,7 @@ async function gatherContext(userId: string) {
   }
 
   if (recentEntries.length > 0) {
-    ctx += `\nLETZTE BUCHUNGEN (Verlauf):\n`;
+    ctx += `\nLETZTE BUCHUNGEN:\n`;
     recentEntries.slice(0, 5).forEach((e: any) => {
       ctx += `  • ${e.datum}: ${e.stunden}h → ${e.projects?.name || "?"} (${e.taetigkeit || ""})\n`;
     });
@@ -204,7 +224,7 @@ async function gatherContext(userId: string) {
     ctx += `  ${i + 1}. ${p.name}  [ID: ${p.id}]\n`;
   });
 
-  return { context: ctx, projects, todayHours, todayEntries };
+  return { context: ctx, projects, todayHours, remainingHours, dailyTarget, todayEntries };
 }
 
 // ─── OpenAI Tool definitions ─────────────────────────────
@@ -215,34 +235,16 @@ const tools = [
     function: {
       name: "stunden_buchen",
       description:
-        "Bucht Arbeitsstunden fuer einen Mitarbeiter auf ein Projekt. Verwende diese Funktion NACHDEM der Mitarbeiter Projekt, Stunden und Taetigkeit mitgeteilt hat.",
+        "Bucht Arbeitsstunden auf ein Projekt. WICHTIG: Pruefe vorher im Kontext wie viele Stunden heute schon gebucht sind. Die Summe aller Buchungen darf die Regelarbeitszeit (8h) nicht ueberschreiten.",
       parameters: {
         type: "object",
         properties: {
-          project_id: {
-            type: "string",
-            description: "UUID des Projekts aus der nummerierten Projektliste",
-          },
-          stunden: {
-            type: "number",
-            description: "Stundenanzahl (z.B. 8, 8.5, 4.25)",
-          },
-          taetigkeit: {
-            type: "string",
-            description: "Beschreibung der Taetigkeit",
-          },
-          datum: {
-            type: "string",
-            description: "Datum YYYY-MM-DD, Standard = heute",
-          },
-          start_time: {
-            type: "string",
-            description: "Startzeit HH:MM (optional, Standard 07:00)",
-          },
-          end_time: {
-            type: "string",
-            description: "Endzeit HH:MM (optional, wird berechnet)",
-          },
+          project_id: { type: "string", description: "UUID des Projekts" },
+          stunden: { type: "number", description: "Stundenanzahl" },
+          taetigkeit: { type: "string", description: "Beschreibung der Taetigkeit" },
+          datum: { type: "string", description: "Datum YYYY-MM-DD, Standard = heute" },
+          start_time: { type: "string", description: "Startzeit HH:MM (optional)" },
+          end_time: { type: "string", description: "Endzeit HH:MM (optional)" },
         },
         required: ["project_id", "stunden", "taetigkeit", "datum"],
       },
@@ -252,19 +254,12 @@ const tools = [
     type: "function" as const,
     function: {
       name: "foto_hochladen",
-      description:
-        "Laedt ein empfangenes Foto auf ein Projekt hoch. Nur aufrufen wenn tatsaechlich ein Foto gesendet wurde.",
+      description: "Laedt ein empfangenes Foto auf ein Projekt hoch.",
       parameters: {
         type: "object",
         properties: {
-          project_id: {
-            type: "string",
-            description: "UUID des Projekts",
-          },
-          beschreibung: {
-            type: "string",
-            description: "Kurze Beschreibung des Fotos",
-          },
+          project_id: { type: "string", description: "UUID des Projekts" },
+          beschreibung: { type: "string", description: "Beschreibung des Fotos" },
         },
         required: ["project_id"],
       },
@@ -274,8 +269,7 @@ const tools = [
     type: "function" as const,
     function: {
       name: "letzte_buchung_loeschen",
-      description:
-        "Loescht die letzte Stundenbuchung des heutigen Tages. Nur wenn der Mitarbeiter explizit sagt, dass die letzte Buchung falsch war.",
+      description: "Loescht die letzte Stundenbuchung des heutigen Tages.",
       parameters: {
         type: "object",
         properties: {
@@ -289,12 +283,8 @@ const tools = [
     type: "function" as const,
     function: {
       name: "projekte_anzeigen",
-      description:
-        "Zeigt die nummerierte Liste aller aktiven Projekte. Verwende wenn der Mitarbeiter fragt welche Projekte es gibt oder eine Auswahl braucht.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
+      description: "Zeigt die nummerierte Liste aller aktiven Projekte.",
+      parameters: { type: "object", properties: {} },
     },
   },
 ];
@@ -318,11 +308,31 @@ async function executeTool(
       if (h <= 0 || h > 24)
         return "FEHLER: Stunden muessen zwischen 0.25 und 24 liegen.";
 
+      // Check total hours for this day
+      const { data: existingEntries } = await supabase
+        .from("time_entries")
+        .select("stunden")
+        .eq("user_id", userId)
+        .eq("datum", datum);
+
+      const alreadyBooked = (existingEntries || []).reduce(
+        (sum: number, e: any) => sum + (e.stunden || 0), 0
+      );
+      const totalAfter = alreadyBooked + h;
+
+      const bookingDate = new Date(datum + "T12:00:00");
+      const dailyTarget = getRegelarbeitszeit(bookingDate);
+
+      if (totalAfter > dailyTarget + 2) {
+        return `FEHLER: Bereits ${alreadyBooked}h gebucht fuer ${datum}. Mit ${h}h waeren es ${totalAfter}h – das ueberschreitet die Regelarbeitszeit (${dailyTarget}h) deutlich. Bitte pruefe die Stunden.`;
+      }
+
       const startTime = input.start_time || "07:00";
       let endTime = input.end_time;
       if (!endTime) {
-        const mins = 7 * 60 + h * 60 + (h > 6 ? 30 : 0);
-        endTime = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(Math.round(mins % 60)).padStart(2, "0")}`;
+        const startMins = parseInt(startTime.split(":")[0]) * 60 + parseInt(startTime.split(":")[1] || "0");
+        const totalMins = startMins + h * 60 + (h > 6 ? 30 : 0);
+        endTime = `${String(Math.floor(totalMins / 60)).padStart(2, "0")}:${String(Math.round(totalMins % 60)).padStart(2, "0")}`;
       }
 
       const { error } = await supabase.from("time_entries").insert({
@@ -340,12 +350,16 @@ async function executeTool(
       if (error) return `FEHLER: ${error.message}`;
 
       const { data: proj } = await supabase
-        .from("projects")
-        .select("name")
-        .eq("id", input.project_id)
-        .maybeSingle();
+        .from("projects").select("name").eq("id", input.project_id).maybeSingle();
 
-      return `ERFOLG: ${h}h auf "${proj?.name}" am ${datum} gebucht. Taetigkeit: ${input.taetigkeit}`;
+      const remaining = dailyTarget - totalAfter;
+      let result = `ERFOLG: ${h}h auf "${proj?.name}" am ${datum} gebucht. Taetigkeit: ${input.taetigkeit}. Tagesgesamt: ${totalAfter}h von ${dailyTarget}h.`;
+      if (remaining > 0.25) {
+        result += ` HINWEIS: Noch ${remaining}h offen fuer heute (Soll: ${dailyTarget}h).`;
+      } else if (remaining >= 0) {
+        result += ` Tagessoll erreicht ✓`;
+      }
+      return result;
     }
 
     case "foto_hochladen": {
@@ -355,17 +369,14 @@ async function executeTool(
         const ts = Date.now();
         const fileName = `${input.project_id}/whatsapp_${ts}.jpg`;
 
-        // Upload to project-photos bucket (public, with INSERT policy)
         const { error: upErr } = await supabase.storage
           .from("project-photos")
           .upload(fileName, buf, { contentType: "image/jpeg", upsert: false });
         if (upErr) throw upErr;
 
         const { data: urlData } = supabase.storage
-          .from("project-photos")
-          .getPublicUrl(fileName);
+          .from("project-photos").getPublicUrl(fileName);
 
-        // Insert into documents table
         const { error: docErr } = await supabase.from("documents").insert({
           name: `WhatsApp Foto – ${senderName} – ${new Date().toLocaleDateString("de-AT")}`,
           file_url: urlData.publicUrl,
@@ -377,14 +388,11 @@ async function executeTool(
         if (docErr) console.error("Doc insert error:", docErr);
 
         const { data: proj } = await supabase
-          .from("projects")
-          .select("name")
-          .eq("id", input.project_id)
-          .maybeSingle();
+          .from("projects").select("name").eq("id", input.project_id).maybeSingle();
 
         return `ERFOLG: Foto auf Projekt "${proj?.name}" hochgeladen.`;
       } catch (e: any) {
-        console.error("Photo upload full error:", e);
+        console.error("Photo upload error:", e);
         return `FEHLER: ${e.message}`;
       }
     }
@@ -393,34 +401,24 @@ async function executeTool(
       const { data: last } = await supabase
         .from("time_entries")
         .select("id, stunden, taetigkeit, projects(name)")
-        .eq("user_id", userId)
-        .eq("datum", today)
+        .eq("user_id", userId).eq("datum", today)
         .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(1).maybeSingle();
 
       if (!last) return "FEHLER: Heute keine Buchungen vorhanden.";
 
       const { error } = await supabase.from("time_entries").delete().eq("id", last.id);
       if (error) return `FEHLER: ${error.message}`;
 
-      return `ERFOLG: Buchung geloescht (${last.stunden}h auf ${(last as any).projects?.name}: ${last.taetigkeit}). Grund: ${input.grund}`;
+      return `ERFOLG: Buchung geloescht (${last.stunden}h auf ${(last as any).projects?.name}: ${last.taetigkeit}).`;
     }
 
     case "projekte_anzeigen": {
       const { data: projects } = await supabase
-        .from("projects")
-        .select("id, name")
-        .eq("status", "aktiv")
-        .order("name");
+        .from("projects").select("id, name").eq("status", "aktiv").order("name");
 
-      if (!projects?.length) return "Keine aktiven Projekte gefunden.";
-
-      let list = "AKTIVE PROJEKTE:\n";
-      projects.forEach((p, i) => {
-        list += `${i + 1}. ${p.name}\n`;
-      });
-      return list;
+      if (!projects?.length) return "Keine aktiven Projekte.";
+      return "AKTIVE PROJEKTE:\n" + projects.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
     }
 
     default:
@@ -451,92 +449,96 @@ async function askGPT(
         Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: msgs,
-        tools,
-        max_tokens: 1024,
-      }),
+      body: JSON.stringify({ model: "gpt-4o", messages: msgs, tools, max_tokens: 1024 }),
     });
     return res.json();
   };
 
   let result = await callGPT(messages);
-
-  // Tool-use loop (max 3 rounds)
   let rounds = 0;
-  while (
-    result.choices?.[0]?.finish_reason === "tool_calls" &&
-    rounds < 3
-  ) {
+
+  while (result.choices?.[0]?.finish_reason === "tool_calls" && rounds < 5) {
     rounds++;
     const msg = result.choices[0].message;
-
-    // Add assistant message with tool calls
     messages.push(msg);
 
-    // Execute each tool call
     for (const tc of msg.tool_calls || []) {
       const args = JSON.parse(tc.function.arguments);
-      const output = await executeTool(
-        tc.function.name,
-        args,
-        userId,
-        senderName,
-        mediaUrl
-      );
-      messages.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        content: output,
-      });
+      const output = await executeTool(tc.function.name, args, userId, senderName, mediaUrl);
+      messages.push({ role: "tool", tool_call_id: tc.id, content: output });
     }
 
     result = await callGPT(messages);
   }
 
-  return (
-    result.choices?.[0]?.message?.content ||
-    "Entschuldigung, da ist etwas schiefgelaufen."
-  );
+  return result.choices?.[0]?.message?.content || "Entschuldigung, da ist etwas schiefgelaufen.";
 }
 
-// ─── Build system prompt ─────────────────────────────────
+// ─── System prompt ───────────────────────────────────────
 
-function buildSystemPrompt(senderName: string, ctx: string, todayHours: number): string {
-  return `Du bist der *eBauer Assistent* – der smarte WhatsApp-Helfer der eBauer GmbH (Elektrofirma).
-Du chattest per WhatsApp mit Mitarbeitern. Sei freundlich, locker und hilfreich – aber immer kurz und knapp (WhatsApp!).
-Verwende WhatsApp-Formatierung: *fett*, _kursiv_. Emojis sparsam und passend.
+function buildSystemPrompt(
+  senderName: string,
+  ctx: string,
+  todayHours: number,
+  remainingHours: number,
+  dailyTarget: number
+): string {
+  return `Du bist der *eBauer Assistent* – der WhatsApp-Helfer der eBauer GmbH (Elektrofirma).
+Sei freundlich, locker, hilfreich – aber kurz und knapp (WhatsApp!).
+WhatsApp-Formatierung: *fett*, _kursiv_. Emojis sparsam.
 
 MITARBEITER: ${senderName}
 ${ctx}
 
-═══ STUNDENBUCHUNG – ABLAUF ═══
+═══ ARBEITSZEIT-REGELN (STRIKT!) ═══
 
-1. Mitarbeiter will Stunden buchen → WENN Projekt + Stunden klar: direkt buchen.
-2. WENN Projekt unklar oder mehrere moeglich: Zeige nummerierte Liste, frag "Auf welches Projekt? Antworte mit der Nummer."
-3. WENN nur "Stunden schreiben" ohne Details: Frag nach Stunden + zeige Projektliste.
-4. WENN nur Stunden genannt aber kein Projekt: Schau Plantafel → schlage vor, sonst Projektliste.
-5. Wenn Mitarbeiter eine Nummer antwortet (z.B. "3"): nimm Projekt Nr. 3 aus der zuletzt gezeigten Liste.
-6. Taetigkeit: Wenn nicht angegeben, frag kurz nach oder nimm sinnvollen Wert aus Kontext.
+ARBEITSZEITEN DER FIRMA:
+• Montag–Donnerstag: 8,5h (07:00–16:00, 30min Mittagspause)
+• Freitag: 5,0h (07:00–12:30, inkl. 0,5h ZA-Ueberstunde)
+• Samstag/Sonntag: frei
+• Wochensoll: 39 Stunden
+
+HEUTE: ${dailyTarget}h Tagessoll. Gebucht: ${todayHours}h. Offen: ${remainingHours}h.
+
+REGELN:
+1. Die Summe aller Buchungen pro Tag darf das Tagessoll NICHT ueberschreiten (max. 1-2h Ueberstunden in Ausnahmen, NUR wenn ausdruecklich bestaetigt).
+2. NACH JEDER BUCHUNG: Wenn noch Reststunden offen sind → SOFORT nachfragen:
+   "Du hast noch Xh offen. Was hast du da gemacht?"
+   Schlage Projekte aus der Plantafel oder den letzten Buchungen vor.
+3. Wenn Mitarbeiter z.B. nur 4h bucht → buche die 4h, dann frag DIREKT nach den restlichen Stunden.
+4. Wenn jemand MEHR als das Tagessoll buchen will → warnen und nur buchen wenn bestaetigt.
+5. Am Wochenende: keine Buchungen ohne ausdruecklichen Grund.
+
+═══ STUNDENBUCHUNG ═══
+
+- Projekt + Stunden klar → direkt buchen
+- Projekt unklar → nummerierte Liste zeigen, "Antworte mit der Nummer"
+- Nur "Stunden schreiben" → Frag Stunden + zeige Projekte
+- Nur Stunden ohne Projekt → Plantafel pruefen, sonst fragen
+- Nummern-Antwort → Projekt aus letzter Liste nehmen
+- Taetigkeit fehlt → kurz nachfragen
+
+═══ SPRACHNACHRICHTEN ═══
+- Sprachnachrichten werden automatisch in Text umgewandelt.
+- Der transkribierte Text kann Fehler enthalten – interpretiere sinnvoll.
+- Wenn unklar, frag kurz nach.
 
 ═══ FOTOS ═══
-- Foto mit Beschreibung → ordne dem genannten Projekt zu
-- Foto ohne Beschreibung → frag nach Projekt
+- Foto mit Beschreibung → Projekt zuordnen
+- Foto ohne → nach Projekt fragen
 
 ═══ KORREKTUREN ═══
-- "Stimmt nicht", "Loesch das" → letzte_buchung_loeschen, vorher kurz bestaetigen
+- "Stimmt nicht" / "Loesch das" → letzte_buchung_loeschen
 
 ═══ EINTEILUNG ═══
-- "Wo muss ich hin?" → Plantafel-Einteilung aus Kontext zeigen
+- "Wo muss ich hin?" → Plantafel zeigen
 
-═══ REGELN ═══
+═══ ALLGEMEINE REGELN ═══
 - IMMER Deutsch
 - Kurz und knapp!
-- Nach Buchung: kurze Bestaetigung mit ✓
-- Bereits gebuchte Stunden erwaehnen wenn > 0
+- Nach Buchung: Bestaetigung mit ✓ + Tagesgesamt + Reststunden
 - Niemals UUIDs oder technische Details zeigen
-- Bei Nummern-Antwort: immer auf letzte Projektliste beziehen
+- Nummern-Antworten beziehen sich auf die letzte Projektliste
 - Du bist Zeiterfassungs-Assistent, kein allgemeiner Chatbot`;
 }
 
@@ -547,6 +549,7 @@ interface ParsedMsg {
   body?: string;
   type: string;
   mediaUrl?: string;
+  audioUrl?: string;
   caption?: string;
 }
 
@@ -569,13 +572,17 @@ function parseWapiPayload(payload: any): ParsedMsg[] {
     } else if (m.type === "document") {
       parsed.caption = m.document?.filename || m.document?.caption;
     } else if (m.type === "voice" || m.type === "audio" || m.type === "ptt") {
-      parsed.body = "[Sprachnachricht – bitte als Text schreiben]";
+      // Voice messages → will be transcribed
+      parsed.audioUrl = m.audio?.link || m.audio?.url || m.audio?.id
+        || m.voice?.link || m.voice?.url || m.voice?.id
+        || m.ptt?.link || m.ptt?.url || m.ptt?.id;
+      console.log("Audio payload:", JSON.stringify(m.audio || m.voice || m.ptt));
     } else if (m.type === "video") {
       parsed.mediaUrl = m.video?.link || m.video?.url;
       parsed.caption = m.video?.caption;
     }
 
-    if (!parsed.body && !parsed.mediaUrl && m.body) {
+    if (!parsed.body && !parsed.mediaUrl && !parsed.audioUrl && m.body) {
       parsed.body = m.body;
     }
 
@@ -611,15 +618,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       const emp = await findEmployeeByPhone(phone);
 
-      // Unknown number → ignore silently (no response)
       if (!emp || !emp.user_id) {
-        console.log(`Unbekannte Nummer ${phone} – keine Antwort`);
+        console.log(`Unbekannte Nummer ${phone}`);
         continue;
       }
 
-      // Known employee but NOT verified by admin → polite rejection
       if (!emp.whatsapp_aktiv) {
-        console.log(`${emp.vorname} ${emp.nachname} nicht freigeschaltet`);
         await sendWhatsApp(
           phone,
           `Hallo ${emp.vorname}! Dein WhatsApp-Zugang wurde noch nicht vom Admin freigeschaltet. Bitte wende dich an deinen Vorgesetzten.`
@@ -630,8 +634,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const name = `${emp.vorname} ${emp.nachname}`.trim();
       const userId = emp.user_id;
 
+      // ── Build user message ──
       let userMessage = "";
-      if (msg.type === "image" || msg.mediaUrl) {
+
+      if (msg.audioUrl) {
+        // Voice message → transcribe with Whisper
+        try {
+          const transcription = await transcribeAudio(msg.audioUrl);
+          userMessage = `[Sprachnachricht] ${transcription}`;
+        } catch (e: any) {
+          console.error("Transcription failed:", e);
+          await sendWhatsApp(phone,
+            "Entschuldigung, ich konnte deine Sprachnachricht leider nicht verstehen. Kannst du es nochmal als Text schreiben? 🙏"
+          );
+          continue;
+        }
+      } else if (msg.type === "image" || msg.mediaUrl) {
         userMessage = msg.caption
           ? `[Foto gesendet] ${msg.caption}`
           : "[Foto gesendet ohne Beschreibung]";
@@ -648,15 +666,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         loadHistory(phone, 12),
       ]);
 
-      const systemPrompt = buildSystemPrompt(name, ctxData.context, ctxData.todayHours);
+      const systemPrompt = buildSystemPrompt(
+        name, ctxData.context, ctxData.todayHours, ctxData.remainingHours, ctxData.dailyTarget
+      );
 
       const reply = await askGPT(
-        systemPrompt,
-        history,
-        userMessage,
-        userId,
-        name,
-        msg.mediaUrl
+        systemPrompt, history, userMessage, userId, name, msg.mediaUrl
       );
 
       await saveMsg(phone, "outgoing", reply, emp.id, userId);
