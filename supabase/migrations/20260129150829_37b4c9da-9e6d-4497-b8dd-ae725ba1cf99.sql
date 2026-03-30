@@ -26,7 +26,7 @@ USING (auth.uid() = user_id OR has_role(auth.uid(), 'administrator'));
 
 -- Create storage bucket for disturbance photos
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('disturbance-photos', 'disturbance-photos', true);
+VALUES ('disturbance-photos', 'disturbance-photos', true) ON CONFLICT (id) DO NOTHING;
 
 -- Storage policies
 CREATE POLICY "Users can upload disturbance photos"

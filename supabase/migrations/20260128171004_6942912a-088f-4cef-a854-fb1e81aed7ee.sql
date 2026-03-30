@@ -1,13 +1,6 @@
--- Teil 1: Fehlenden User "Max Mustermann" manuell einfügen
-INSERT INTO public.profiles (id, vorname, nachname, is_active)
-VALUES ('f4556eed-6e68-4840-b1f2-e773f792680f', 'Max', 'Mustermann', true)
-ON CONFLICT (id) DO NOTHING;
+-- Test-User entfernt (existiert nicht auf neuem Projekt)
 
-INSERT INTO public.user_roles (user_id, role)
-VALUES ('f4556eed-6e68-4840-b1f2-e773f792680f', 'mitarbeiter')
-ON CONFLICT (user_id, role) DO NOTHING;
-
--- Teil 2: Funktion für automatische Profil-Erstellung bei erstem Login
+-- Funktion für automatische Profil-Erstellung bei erstem Login
 CREATE OR REPLACE FUNCTION public.ensure_user_profile()
 RETURNS json
 LANGUAGE plpgsql
@@ -39,7 +32,7 @@ BEGIN
   WHERE id = current_user_id;
   
   -- Determine role based on email
-  IF user_email IN ('office@moebel-eder.at', 'napetschnig.chris@gmail.com', 'office@elektro-brodnig.at') THEN
+  IF user_email IN ('napetschnig.chris@gmail.com') THEN
     assigned_role := 'administrator';
   ELSE
     assigned_role := 'mitarbeiter';

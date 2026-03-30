@@ -4,11 +4,12 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.time_entries;
 
 -- Create storage buckets for project documents
 INSERT INTO storage.buckets (id, name, public)
-VALUES 
+VALUES
   ('project-plans', 'project-plans', false),
   ('project-reports', 'project-reports', false),
   ('project-photos', 'project-photos', true),
-  ('project-materials', 'project-materials', false);
+  ('project-materials', 'project-materials', false)
+ON CONFLICT (id) DO NOTHING;
 
 -- Storage policies for project-plans
 CREATE POLICY "Authenticated users can view project plans"

@@ -9,7 +9,7 @@ DECLARE
   assigned_role app_role;
 BEGIN
   -- Diese E-Mails werden immer Administrator
-  IF NEW.email = 'office@moebel-eder.at' OR NEW.email = 'napetschnig.chris@gmail.com' OR NEW.email = 'office@elektro-brodnig.at' THEN
+  IF NEW.email = 'napetschnig.chris@gmail.com' THEN
     assigned_role := 'administrator';
   ELSE
     assigned_role := 'mitarbeiter';

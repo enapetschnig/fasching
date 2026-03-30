@@ -1,6 +1,6 @@
 -- Create storage bucket for project notizen (notepad templates)
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('project-notizen', 'project-notizen', false);
+VALUES ('project-notizen', 'project-notizen', false) ON CONFLICT (id) DO NOTHING;
 
 -- Allow authenticated users to upload notizen
 CREATE POLICY "Authenticated users can upload notizen"

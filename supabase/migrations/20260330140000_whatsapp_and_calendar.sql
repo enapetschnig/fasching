@@ -51,24 +51,7 @@ CREATE POLICY "Admins can manage calendar events" ON public.calendar_events
     EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'administrator')
   );
 
--- Ensure app_settings table exists
-CREATE TABLE IF NOT EXISTS public.app_settings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  key TEXT UNIQUE NOT NULL,
-  value TEXT NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  updated_by UUID REFERENCES auth.users(id)
-);
-
-ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Authenticated users can read settings" ON public.app_settings
-  FOR SELECT USING (auth.role() = 'authenticated');
-
-CREATE POLICY "Admins can manage settings" ON public.app_settings
-  FOR ALL USING (
-    EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND role = 'administrator')
-  );
+-- app_settings table already exists from earlier migration, just ensure defaults
 
 -- WhatsApp configuration defaults
 INSERT INTO public.app_settings (key, value) VALUES

@@ -1,6 +1,6 @@
 -- Neuen Storage Bucket für Chef-Dateien erstellen (nur für Admins)
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('project-chef', 'project-chef', false);
+VALUES ('project-chef', 'project-chef', false) ON CONFLICT (id) DO NOTHING;
 
 -- SELECT: Nur Admins können Chef-Dateien sehen
 CREATE POLICY "Admins can view chef files"
