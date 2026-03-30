@@ -296,7 +296,8 @@ async function executeTool(
   input: any,
   userId: string,
   senderName: string,
-  mediaUrl?: string
+  mediaRef?: string,
+  cachedImageBuffer?: ArrayBuffer | null
 ): Promise<string> {
   const today = new Date().toISOString().split("T")[0];
 
@@ -363,9 +364,9 @@ async function executeTool(
     }
 
     case "foto_hochladen": {
-      if (!mediaUrl) return "FEHLER: Kein Foto vorhanden.";
+      if (!cachedImageBuffer) return "FEHLER: Kein Foto vorhanden.";
       try {
-        const buf = await downloadMedia(mediaUrl);
+        const buf = cachedImageBuffer;
         const ts = Date.now();
         const fileName = `${input.project_id}/whatsapp_${ts}.jpg`;
 
@@ -434,7 +435,8 @@ async function askGPT(
   userMessage: string,
   userId: string,
   senderName: string,
-  mediaUrl?: string
+  mediaRef?: string,
+  cachedImageBuffer?: ArrayBuffer | null
 ): Promise<string> {
   const messages: any[] = [
     { role: "system", content: systemPrompt },
@@ -464,7 +466,7 @@ async function askGPT(
 
     for (const tc of msg.tool_calls || []) {
       const args = JSON.parse(tc.function.arguments);
-      const output = await executeTool(tc.function.name, args, userId, senderName, mediaUrl);
+      const output = await executeTool(tc.function.name, args, userId, senderName, mediaRef, cachedImageBuffer);
       messages.push({ role: "tool", tool_call_id: tc.id, content: output });
     }
 
@@ -636,6 +638,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       // ── Build user message ──
       let userMessage = "";
+      let cachedImageBuffer: ArrayBuffer | null = null;
 
       if (msg.audioUrl) {
         // Voice message → transcribe with Whisper
@@ -653,6 +656,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
         userMessage = msg.caption
           ? `[Foto gesendet] ${msg.caption}`
           : "[Foto gesendet ohne Beschreibung]";
+
+        // Download image IMMEDIATELY (WAPI URLs expire quickly)
+        if (msg.mediaUrl) {
+          try {
+            console.log("Pre-downloading image...");
+            cachedImageBuffer = await downloadMedia(msg.mediaUrl);
+            console.log(`Image cached: ${cachedImageBuffer.byteLength} bytes`);
+          } catch (e: any) {
+            console.error("Image pre-download failed:", e);
+            await sendWhatsApp(phone,
+              "Entschuldigung, ich konnte das Bild leider nicht empfangen. Kannst du es nochmal schicken? 📸"
+            );
+            continue;
+          }
+        }
       } else {
         userMessage = msg.body || "";
       }
@@ -670,8 +688,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         name, ctxData.context, ctxData.todayHours, ctxData.remainingHours, ctxData.dailyTarget
       );
 
+      // Pass cached image buffer reference instead of URL
+      const mediaRef = cachedImageBuffer ? `__cached__` : undefined;
+
       const reply = await askGPT(
-        systemPrompt, history, userMessage, userId, name, msg.mediaUrl
+        systemPrompt, history, userMessage, userId, name, mediaRef, cachedImageBuffer
       );
 
       await saveMsg(phone, "outgoing", reply, emp.id, userId);
