@@ -101,6 +101,8 @@ export default function ScheduleBoard() {
       end_time: endTime || "16:00",
     };
 
+    let assignmentId: string | null = null;
+
     if (existing) {
       const { error } = await supabase
         .from("worker_assignments")
@@ -110,6 +112,7 @@ export default function ScheduleBoard() {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
         return;
       }
+      assignmentId = existing.id;
       setAssignments((prev) =>
         prev.map((a) =>
           a.id === existing.id ? { ...a, ...payload } : a
@@ -128,13 +131,28 @@ export default function ScheduleBoard() {
         toast({ variant: "destructive", title: "Fehler", description: error.message });
         return;
       }
-      if (data) setAssignments((prev) => [...prev, data as Assignment]);
+      if (data) {
+        assignmentId = data.id;
+        setAssignments((prev) => [...prev, data as Assignment]);
+      }
+    }
+
+    // Sync to Google Calendar (fire and forget)
+    if (assignmentId) {
+      supabase.functions.invoke("sync-assignment-to-calendar", {
+        body: { action: "sync", assignment_id: assignmentId },
+      }).catch((e: any) => console.error("Calendar sync failed:", e));
     }
   };
 
   const handleRemove = async (uid: string, date: Date) => {
     const existing = getAssignmentForDay(assignments, uid, date);
     if (!existing) return;
+
+    // Delete from Google Calendar first (fire and forget)
+    supabase.functions.invoke("sync-assignment-to-calendar", {
+      body: { action: "delete", assignment_id: existing.id },
+    }).catch((e: any) => console.error("Calendar delete failed:", e));
 
     const { error } = await supabase
       .from("worker_assignments")
