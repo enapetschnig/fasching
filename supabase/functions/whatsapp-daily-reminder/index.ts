@@ -36,60 +36,65 @@ async function getSetting(key: string, fallback: string): Promise<string> {
   return data?.value || fallback;
 }
 
+// Working hours per day (same as webhook)
+function getDailyTarget(): number {
+  const day = new Date().getDay();
+  if (day === 0 || day === 6) return 0;
+  if (day >= 1 && day <= 4) return 8.5;
+  if (day === 5) return 5.0;
+  return 0;
+}
+
+async function getProjectList(): Promise<string> {
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("name")
+    .eq("status", "aktiv")
+    .order("name");
+
+  if (!projects?.length) return "";
+  return projects.map((p: any, i: number) => `${i + 1}. ${p.name}`).join("\n");
+}
+
 async function generateReminderMessage(
   name: string,
   scheduleInfo: string,
   todayHours: number,
-  isEvening: boolean
+  isEvening: boolean,
+  projectList: string
 ): Promise<string> {
+  const dailyTarget = getDailyTarget();
+  const remaining = Math.max(0, dailyTarget - todayHours);
+
   const dayNames = [
     "Sonntag", "Montag", "Dienstag", "Mittwoch",
     "Donnerstag", "Freitag", "Samstag",
   ];
-  const today = new Date();
-  const dayName = dayNames[today.getDay()];
-  const dateStr = today.toLocaleDateString("de-AT");
+  const dayName = dayNames[new Date().getDay()];
 
-  const timeOfDay = isEvening ? "Abend" : "Morgen";
-  const purpose = isEvening
-    ? "Erinnerung, dass Stunden noch fehlen."
-    : "Tagesuebersicht mit Einteilung und Motivation.";
+  if (isEvening && remaining > 0) {
+    // Evening reminder: direct, with project list ready to go
+    let msg = `Hey ${name}! 👋\n\n`;
+    msg += `Du hast heute noch *${remaining}h* offen (${todayHours > 0 ? `${todayHours}/${dailyTarget}h gebucht` : `${dailyTarget}h Tagessoll`}).\n\n`;
+    msg += `*Auf welches Projekt?*\n${projectList}\n\n`;
+    msg += `Antwort z.B.: _"1 ${remaining}h Kabel verlegt"_`;
+    return msg;
+  }
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${openaiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `Du schreibst eine kurze WhatsApp-${timeOfDay}nachricht fuer einen Mitarbeiter der eBauer GmbH (Elektrofirma).
-${purpose}
-Sei freundlich, locker, kurz (max 4-5 Zeilen). WhatsApp-Formatierung (*fett*) und passende Emojis.
-Variiere den Ton – nicht jeden Tag gleich.
-${isEvening ? 'Erwaehne dass Stunden noch fehlen. Ende: "Schreib mir einfach z.B. *8h Projektname was du gemacht hast*"' : 'Ende: Hinweis dass Stunden per Nachricht geschrieben werden koennen.'}`,
-        },
-        {
-          role: "user",
-          content: `Name: ${name}
-Tag: ${dayName}, ${dateStr}
-Heute gebucht: ${todayHours > 0 ? `${todayHours}h` : "noch nichts"}
-Einteilung: ${scheduleInfo || "keine"}
-Typ: ${isEvening ? "Abenderinnerung" : "Morgennachricht"}`,
-        },
-      ],
-      max_tokens: 300,
-    }),
-  });
+  if (isEvening && remaining <= 0) {
+    // Already done for the day
+    return `Hey ${name}! Deine Stunden für heute sind komplett (${todayHours}h) ✓ Schönen Feierabend! 🍺`;
+  }
 
-  const result = await res.json();
-  return (
-    result.choices?.[0]?.message?.content ||
-    `Hey ${name}! ${isEvening ? "Vergiss nicht deine Stunden einzutragen!" : "Guten Morgen!"} Schreib mir z.B. "8h Projektname Beschreibung" 👷`
-  );
+  // Morning message
+  let msg = `Guten Morgen ${name}! ☀️\n\n`;
+  if (scheduleInfo) {
+    msg += `📋 *Deine Einteilung heute:* ${scheduleInfo}\n\n`;
+  }
+  msg += `Tagessoll: *${dailyTarget}h* (${dayName})\n\n`;
+  msg += `*Projekte:*\n${projectList}\n\n`;
+  msg += `Stunden schreiben = Nummer + Stunden, z.B. _"1 8h Montage"_`;
+  return msg;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -155,7 +160,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // For evening: skip employees who logged >= 6h
+    // For evening: skip employees who already reached their daily target
+    const dailyTarget = getDailyTarget();
     let usersWithEnoughHours = new Set<string>();
     if (isEvening) {
       const { data: entries } = await supabase
@@ -168,9 +174,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         hoursByUser[e.user_id] = (hoursByUser[e.user_id] || 0) + e.stunden;
       });
       Object.entries(hoursByUser).forEach(([uid, h]) => {
-        if (h >= 6) usersWithEnoughHours.add(uid);
+        if (h >= dailyTarget - 0.5) usersWithEnoughHours.add(uid);
       });
     }
+
+    // Load project list once for all employees
+    const projectList = await getProjectList();
 
     let sentCount = 0;
     const results: any[] = [];
@@ -210,7 +219,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           emp.vorname,
           scheduleInfo,
           todayHours,
-          isEvening
+          isEvening,
+          projectList
         );
 
         const waPhone = formatPhone(emp.telefon);

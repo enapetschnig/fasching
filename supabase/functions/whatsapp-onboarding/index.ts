@@ -33,47 +33,23 @@ function formatPhone(phone: string): string {
   return cleaned;
 }
 
-function buildOnboardingMessage(vorname: string): string {
-  return `Hallo ${vorname}! 👋
+function buildOnboardingMessage(vorname: string, projectList: string): string {
+  return `Hey ${vorname}! 👋 Ich bin der *eBauer Assistent*.
 
-Willkommen beim *eBauer GmbH WhatsApp-Assistenten*! 🎉
+Ab jetzt kannst du deine Stunden einfach hier per WhatsApp schreiben – kein Zettel, keine App nötig.
 
-Ich bin dein digitaler Helfer und mache dir das Arbeiten einfacher. Hier ist, was ich alles kann:
+*So geht's:*
+Ich zeig dir die Projekte, du antwortest mit Nummer + Stunden. Fertig. ✓
 
-━━━━━━━━━━━━━━━━━━━
+${projectList}
 
-📝 *Stunden buchen*
-Schreib mir einfach was du gemacht hast, z.B.:
-• _"8h Musterstraße Kabel verlegt"_
-• _"Heute 6,5 Stunden auf der Baustelle Sonnenhof"_
-• _"Von 7 bis 15:30 war ich in der Werkstatt"_
+*Beispiel:* Antwort _"1 8h Kabel verlegt"_ → bucht 8h auf Projekt 1
 
-Wenn du nicht weißt auf welches Projekt: Schreib einfach _"Stunden schreiben"_ und ich zeig dir die Projektliste!
+📸 *Foto?* Einfach schicken mit Projektname als Beschreibung
+🎤 *Sprachnachricht?* Geht auch – ich versteh dich
+📋 *Einteilung?* Frag _"Wo muss ich hin?"_
 
-━━━━━━━━━━━━━━━━━━━
-
-📸 *Fotos hochladen*
-Schick mir ein Foto mit dem Projektnamen als Beschreibung – fertig! Das Foto wird automatisch dem Projekt zugeordnet.
-
-━━━━━━━━━━━━━━━━━━━
-
-📋 *Einteilung abfragen*
-Frag mich einfach:
-• _"Wo muss ich heute hin?"_
-• _"Was steht heute an?"_
-
-━━━━━━━━━━━━━━━━━━━
-
-❌ *Korrektur*
-Falls mal was falsch war:
-• _"Die letzte Buchung war falsch"_
-• _"Lösch die letzte Buchung"_
-
-━━━━━━━━━━━━━━━━━━━
-
-Du kannst ganz normal mit mir schreiben – ich verstehe dich! 💬
-
-Probier's gleich aus: Schreib mir z.B. _"Projekte"_ um alle aktiven Projekte zu sehen.`;
+Das war's schon – probier's gleich aus! 🚀`;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -153,8 +129,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    // Fetch active projects for the project list
+    const { data: projects } = await supabase
+      .from("projects")
+      .select("name")
+      .eq("status", "aktiv")
+      .order("name");
+
+    let projectList = "*Deine Projekte:*\n";
+    if (projects?.length) {
+      projects.forEach((p: any, i: number) => {
+        projectList += `${i + 1}. ${p.name}\n`;
+      });
+    } else {
+      projectList += "_Noch keine Projekte angelegt_\n";
+    }
+
     const waPhone = formatPhone(emp.telefon);
-    const message = buildOnboardingMessage(emp.vorname);
+    const message = buildOnboardingMessage(emp.vorname, projectList);
 
     // Send onboarding message
     const result = await sendWhatsApp(waPhone, message);
