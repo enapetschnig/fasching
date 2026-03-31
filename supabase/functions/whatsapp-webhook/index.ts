@@ -157,17 +157,38 @@ async function saveMsg(
   });
 }
 
-// ─── Rich context ────────────────────────────────────────
+// ─── Helper: get monday of current week ──────────────────
+
+function getMonday(d: Date): Date {
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.getFullYear(), d.getMonth(), diff);
+}
+
+function getRegelarbeitszeitForDate(d: Date): number {
+  const day = d.getDay();
+  if (day === 0 || day === 6) return 0;
+  if (day >= 1 && day <= 4) return 8.5;
+  if (day === 5) return 5.0;
+  return 0;
+}
+
+// ─── Rich context (the "brain" per employee) ─────────────
 
 async function gatherContext(userId: string) {
-  const today = new Date().toISOString().split("T")[0];
-  const dayNames = [
-    "Sonntag", "Montag", "Dienstag", "Mittwoch",
-    "Donnerstag", "Freitag", "Samstag",
-  ];
-  const dayName = dayNames[new Date().getDay()];
+  const now = new Date();
+  const today = now.toISOString().split("T")[0];
+  const dayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+  const dayName = dayNames[now.getDay()];
 
-  const [projectsRes, todayEntriesRes, assignmentsRes, recentEntriesRes] =
+  // Get the full week range (Monday–Sunday)
+  const monday = getMonday(now);
+  const mondayStr = monday.toISOString().split("T")[0];
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const sundayStr = sunday.toISOString().split("T")[0];
+
+  const [projectsRes, todayEntriesRes, assignmentsRes, weekEntriesRes] =
     await Promise.all([
       supabase.from("projects").select("id, name").eq("status", "aktiv").order("name"),
       supabase.from("time_entries")
@@ -177,25 +198,60 @@ async function gatherContext(userId: string) {
       supabase.from("worker_assignments")
         .select("project_id, projects(name)")
         .eq("worker_id", userId).eq("date", today),
+      // Entire week for the weekly brain
       supabase.from("time_entries")
         .select("datum, stunden, taetigkeit, projects(name)")
-        .eq("user_id", userId).order("datum", { ascending: false }).limit(7),
+        .eq("user_id", userId)
+        .gte("datum", mondayStr)
+        .lte("datum", sundayStr)
+        .order("datum", { ascending: true }),
     ]);
 
   const projects = projectsRes.data || [];
   const todayEntries = todayEntriesRes.data || [];
   const assignments = (assignmentsRes.data || []) as any[];
-  const recentEntries = (recentEntriesRes.data || []) as any[];
+  const weekEntries = (weekEntriesRes.data || []) as any[];
 
+  // ── Today ──
   const todayHours = todayEntries.reduce(
     (sum: number, e: any) => sum + (e.stunden || 0), 0
   );
   const dailyTarget = getRegelarbeitszeit();
   const remainingHours = Math.max(0, dailyTarget - todayHours);
 
-  let ctx = `DATUM HEUTE: ${today} (${dayName})\n`;
+  // ── Week analysis ──
+  const weekHoursByDay: Record<string, number> = {};
+  const weekDetailsByDay: Record<string, string[]> = {};
+  weekEntries.forEach((e: any) => {
+    weekHoursByDay[e.datum] = (weekHoursByDay[e.datum] || 0) + e.stunden;
+    if (!weekDetailsByDay[e.datum]) weekDetailsByDay[e.datum] = [];
+    weekDetailsByDay[e.datum].push(`${e.stunden}h ${e.projects?.name || "?"}`);
+  });
+
+  const weekTotal = Object.values(weekHoursByDay).reduce((a, b) => a + b, 0);
+  const weekTarget = 39; // Mo-Fr Soll
+
+  // Find missing days (work days with no or too few hours)
+  const missingDays: string[] = [];
+  for (let i = 0; i < 5; i++) { // Mo-Fr
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    const dStr = d.toISOString().split("T")[0];
+    if (dStr > today) break; // Don't check future days
+    const dayTarget = getRegelarbeitszeitForDate(d);
+    const dayBooked = weekHoursByDay[dStr] || 0;
+    if (dayBooked < dayTarget - 0.5) {
+      const dayLabel = dayNames[d.getDay()];
+      const missing = dayTarget - dayBooked;
+      missingDays.push(`${dayLabel} (${dStr}): ${dayBooked}/${dayTarget}h – fehlen ${missing}h`);
+    }
+  }
+
+  // ── Build context string ──
+  let ctx = `═══ MITARBEITER-GEHIRN ═══\n`;
+  ctx += `DATUM HEUTE: ${today} (${dayName})\n`;
   ctx += `REGELARBEITSZEIT HEUTE: ${dailyTarget}h (${dayName === "Freitag" ? "Freitag = kuerzerer Tag" : "Mo-Do"})\n`;
-  ctx += `HEUTE BEREITS GEBUCHT: ${todayHours}h\n`;
+  ctx += `HEUTE GEBUCHT: ${todayHours}h\n`;
   ctx += `NOCH OFFEN HEUTE: ${remainingHours}h\n`;
 
   if (todayEntries.length > 0) {
@@ -212,11 +268,30 @@ async function gatherContext(userId: string) {
     });
   }
 
-  if (recentEntries.length > 0) {
-    ctx += `\nLETZTE BUCHUNGEN:\n`;
-    recentEntries.slice(0, 5).forEach((e: any) => {
-      ctx += `  • ${e.datum}: ${e.stunden}h → ${e.projects?.name || "?"} (${e.taetigkeit || ""})\n`;
-    });
+  // ── Weekly overview ──
+  ctx += `\n═══ WOCHENUEBERBLICK (KW ${getISOWeek(now)}) ═══\n`;
+  ctx += `WOCHENSOLL: ${weekTarget}h | GEBUCHT: ${weekTotal}h | DIFFERENZ: ${(weekTotal - weekTarget).toFixed(1)}h\n`;
+
+  // Day-by-day breakdown
+  ctx += `\nTAG-FUER-TAG:\n`;
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    const dStr = d.toISOString().split("T")[0];
+    const dLabel = dayNames[d.getDay()].slice(0, 2);
+    const dTarget = getRegelarbeitszeitForDate(d);
+    const dBooked = weekHoursByDay[dStr] || 0;
+    const isToday = dStr === today;
+    const isFuture = dStr > today;
+    const status = isFuture ? "⏳" : dBooked >= dTarget - 0.5 ? "✅" : "❌";
+    const details = weekDetailsByDay[dStr]?.join(", ") || (isFuture ? "–" : "KEINE BUCHUNG");
+    ctx += `  ${status} ${dLabel} ${dStr}: ${dBooked}/${dTarget}h ${isToday ? "(HEUTE)" : ""} → ${details}\n`;
+  }
+
+  if (missingDays.length > 0) {
+    ctx += `\n⚠️ FEHLENDE STUNDEN:\n`;
+    missingDays.forEach((d) => { ctx += `  • ${d}\n`; });
+    ctx += `→ Wenn der Mitarbeiter heute Stunden bucht, frag ob er auch die fehlenden Tage nachtragen will!\n`;
   }
 
   ctx += `\nAKTIVE PROJEKTE (nummeriert):\n`;
@@ -224,7 +299,15 @@ async function gatherContext(userId: string) {
     ctx += `  ${i + 1}. ${p.name}  [ID: ${p.id}]\n`;
   });
 
-  return { context: ctx, projects, todayHours, remainingHours, dailyTarget, todayEntries };
+  return { context: ctx, projects, todayHours, remainingHours, dailyTarget, todayEntries, weekTotal, missingDays };
+}
+
+function getISOWeek(d: Date): number {
+  const date = new Date(d.getTime());
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
 }
 
 // ─── OpenAI Tool definitions ─────────────────────────────
@@ -483,65 +566,57 @@ function buildSystemPrompt(
   ctx: string,
   todayHours: number,
   remainingHours: number,
-  dailyTarget: number
+  dailyTarget: number,
+  missingDays: string[]
 ): string {
   return `Du bist der *eBauer Assistent* – der WhatsApp-Helfer der eBauer GmbH (Elektrofirma).
 Sei freundlich, locker, hilfreich – aber kurz und knapp (WhatsApp!).
 WhatsApp-Formatierung: *fett*, _kursiv_. Emojis sparsam.
 
 MITARBEITER: ${senderName}
+
 ${ctx}
 
-═══ ARBEITSZEIT-REGELN (STRIKT!) ═══
+═══ DEIN VERHALTEN ("GEHIRN") ═══
 
-ARBEITSZEITEN DER FIRMA:
-• Montag–Donnerstag: 8,5h (07:00–16:00, 30min Mittagspause)
-• Freitag: 5,0h (07:00–12:30, inkl. 0,5h ZA-Ueberstunde)
-• Samstag/Sonntag: frei
-• Wochensoll: 39 Stunden
+Du hast oben den KOMPLETTEN Wochenueberblick dieses Mitarbeiters. Nutze dieses Wissen AKTIV:
 
-HEUTE: ${dailyTarget}h Tagessoll. Gebucht: ${todayHours}h. Offen: ${remainingHours}h.
+1. Du WEISST immer genau wie viele Stunden heute und diese Woche gebucht sind.
+2. NACH JEDER BUCHUNG: Zeig den aktuellen Stand ("${todayHours > 0 ? todayHours + "h" : "0h"} von ${dailyTarget}h heute").
+3. Wenn noch Reststunden offen sind → zeige die nummerierte Projektliste und frag:
+   "Noch Xh offen – auf welches Projekt? Antworte mit Nummer + Stunden."
+4. ${missingDays.length > 0 ? `ACHTUNG: Es fehlen Stunden an frueheren Tagen! Sprich das PROAKTIV an und biete an, nachzutragen.` : "Alle bisherigen Tage der Woche sind komplett ✓"}
+5. Wenn Mitarbeiter fragt "Wie sieht meine Woche aus?" → zeig den Wochenueberblick.
+6. Wenn Tagessoll erreicht → kurz bestaetigen: "Heute komplett ✓ Schoenen Feierabend!"
 
-REGELN:
-1. Die Summe aller Buchungen pro Tag darf das Tagessoll NICHT ueberschreiten (max. 1-2h Ueberstunden in Ausnahmen, NUR wenn ausdruecklich bestaetigt).
-2. NACH JEDER BUCHUNG: Wenn noch Reststunden offen sind → SOFORT nachfragen:
-   "Du hast noch Xh offen. Was hast du da gemacht?"
-   Schlage Projekte aus der Plantafel oder den letzten Buchungen vor.
-3. Wenn Mitarbeiter z.B. nur 4h bucht → buche die 4h, dann frag DIREKT nach den restlichen Stunden.
-4. Wenn jemand MEHR als das Tagessoll buchen will → warnen und nur buchen wenn bestaetigt.
-5. Am Wochenende: keine Buchungen ohne ausdruecklichen Grund.
+═══ ARBEITSZEITEN ═══
+Mo–Do: 8,5h | Fr: 5,0h | Wochensoll: 39h
+Nicht mehr als Tagessoll buchen (Ueberstunden nur wenn ausdruecklich bestaetigt).
 
 ═══ STUNDENBUCHUNG ═══
-
-- Projekt + Stunden klar → direkt buchen
-- Projekt unklar → nummerierte Liste zeigen, "Antworte mit der Nummer"
-- Nur "Stunden schreiben" → Frag Stunden + zeige Projekte
-- Nur Stunden ohne Projekt → Plantafel pruefen, sonst fragen
-- Nummern-Antwort → Projekt aus letzter Liste nehmen
+- Projekt + Stunden klar → buchen, Bestaetigung + Reststand zeigen + Projektliste fuer Rest
+- Projekt unklar → nummerierte Liste, "Antworte mit der Nummer"
+- Nur "Stunden schreiben" → Projektliste zeigen + Tagessoll nennen
+- Nummern-Antwort (z.B. "3") → Projekt Nr. 3 aus letzter Liste
 - Taetigkeit fehlt → kurz nachfragen
+- Fuer vergangene Tage buchen: Mitarbeiter kann auch z.B. "gestern 8h Werkstatt" sagen
 
 ═══ SPRACHNACHRICHTEN ═══
-- Sprachnachrichten werden automatisch in Text umgewandelt.
-- Der transkribierte Text kann Fehler enthalten – interpretiere sinnvoll.
-- Wenn unklar, frag kurz nach.
+Werden automatisch transkribiert. Bei Unklarheiten sinnvoll interpretieren.
 
 ═══ FOTOS ═══
-- Foto mit Beschreibung → Projekt zuordnen
-- Foto ohne → nach Projekt fragen
+Mit Beschreibung → Projekt zuordnen. Ohne → nach Projekt fragen.
 
 ═══ KORREKTUREN ═══
-- "Stimmt nicht" / "Loesch das" → letzte_buchung_loeschen
+"Stimmt nicht" / "Loesch das" → letzte_buchung_loeschen
 
 ═══ EINTEILUNG ═══
-- "Wo muss ich hin?" → Plantafel zeigen
+"Wo muss ich hin?" → Plantafel zeigen
 
-═══ ALLGEMEINE REGELN ═══
-- IMMER Deutsch
-- Kurz und knapp!
-- Nach Buchung: Bestaetigung mit ✓ + Tagesgesamt + Reststunden
-- Niemals UUIDs oder technische Details zeigen
-- Nummern-Antworten beziehen sich auf die letzte Projektliste
-- Du bist Zeiterfassungs-Assistent, kein allgemeiner Chatbot`;
+═══ REGELN ═══
+- IMMER Deutsch, kurz, knapp
+- Niemals UUIDs oder technische Details
+- Immer Projektliste mitschicken wenn Reststunden offen`;
 }
 
 // ─── Parse WAPI webhook ──────────────────────────────────
@@ -685,7 +760,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ]);
 
       const systemPrompt = buildSystemPrompt(
-        name, ctxData.context, ctxData.todayHours, ctxData.remainingHours, ctxData.dailyTarget
+        name, ctxData.context, ctxData.todayHours, ctxData.remainingHours,
+        ctxData.dailyTarget, ctxData.missingDays
       );
 
       // Pass cached image buffer reference instead of URL
