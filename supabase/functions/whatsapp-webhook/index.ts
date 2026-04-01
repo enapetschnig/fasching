@@ -630,6 +630,7 @@ interface ParsedMsg {
   mediaUrl?: string;
   audioUrl?: string;
   caption?: string;
+  messageId?: string;
 }
 
 function parseWapiPayload(payload: any): ParsedMsg[] {
@@ -640,14 +641,18 @@ function parseWapiPayload(payload: any): ParsedMsg[] {
     const from = (m.from || m.chat_id || "").replace("@s.whatsapp.net", "");
     if (!from || m.from_me) continue;
 
-    const parsed: ParsedMsg = { from, type: m.type || "text" };
+    const parsed: ParsedMsg = { from, type: m.type || "text", messageId: m.id };
 
     if (m.type === "text" || (!m.type && m.text)) {
       parsed.body = m.text?.body || m.body || m.text;
     } else if (m.type === "image") {
-      parsed.mediaUrl = m.image?.link || m.image?.url || m.image?.id;
-      parsed.caption = m.image?.caption;
-      console.log("Image payload:", JSON.stringify(m.image));
+      // WAPI sends image data in various formats - try all known paths
+      parsed.mediaUrl = m.image?.link || m.image?.url || m.image?.id
+        || m.media?.link || m.media?.url
+        || m.link || m.url;
+      parsed.caption = m.image?.caption || m.caption;
+      // Log entire message structure for debugging
+      console.log("IMAGE MSG FULL:", JSON.stringify(m).slice(0, 1000));
     } else if (m.type === "document") {
       parsed.caption = m.document?.filename || m.document?.caption;
     } else if (m.type === "voice" || m.type === "audio" || m.type === "ptt") {
@@ -683,6 +688,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const payload = await req.json();
+    // Log full payload for debugging image issues
+    console.log("WEBHOOK PAYLOAD:", JSON.stringify(payload).slice(0, 2000));
     const incoming = parseWapiPayload(payload);
 
     if (incoming.length === 0) {
@@ -735,18 +742,53 @@ Deno.serve(async (req: Request): Promise<Response> => {
           : "[Foto gesendet ohne Beschreibung]";
 
         // Download image IMMEDIATELY (WAPI URLs expire quickly)
-        if (msg.mediaUrl) {
+        // Try multiple methods to get the image
+        const mediaSource = msg.mediaUrl || msg.messageId;
+        if (mediaSource) {
           try {
-            console.log("Pre-downloading image...");
-            cachedImageBuffer = await downloadMedia(msg.mediaUrl);
-            console.log(`Image cached: ${cachedImageBuffer.byteLength} bytes`);
+            console.log("Pre-downloading image, source:", mediaSource);
+
+            if (msg.mediaUrl && msg.mediaUrl.startsWith("http")) {
+              // Direct URL
+              cachedImageBuffer = await downloadMedia(msg.mediaUrl);
+            } else {
+              // Use WAPI media endpoint with message ID
+              const mediaId = msg.mediaUrl || msg.messageId;
+              console.log("Trying WAPI /media endpoint with ID:", mediaId);
+              const res = await fetch(`${WAPI_BASE}/media/${mediaId}`, {
+                headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
+              });
+              if (res.ok) {
+                cachedImageBuffer = await res.arrayBuffer();
+              } else {
+                // Fallback: try /messages/{id}/download
+                console.log("Trying /messages download endpoint...");
+                const res2 = await fetch(`${WAPI_BASE}/messages/${msg.messageId}/download`, {
+                  headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
+                });
+                if (res2.ok) {
+                  cachedImageBuffer = await res2.arrayBuffer();
+                } else {
+                  console.error("All media download methods failed");
+                }
+              }
+            }
+
+            if (cachedImageBuffer) {
+              console.log(`Image cached: ${cachedImageBuffer.byteLength} bytes`);
+            } else {
+              console.error("Image buffer is null after all attempts");
+            }
           } catch (e: any) {
             console.error("Image pre-download failed:", e);
-            await sendWhatsApp(phone,
-              "Entschuldigung, ich konnte das Bild leider nicht empfangen. Kannst du es nochmal schicken? 📸"
-            );
-            continue;
           }
+        }
+
+        // If image download failed, tell GPT there's no image
+        if (!cachedImageBuffer) {
+          userMessage = msg.caption
+            ? `[Foto gesendet aber Download fehlgeschlagen] ${msg.caption}`
+            : "[Foto gesendet aber konnte nicht heruntergeladen werden]";
         }
       } else {
         userMessage = msg.body || "";
