@@ -50,24 +50,47 @@ async function sendWhatsApp(to: string, message: string) {
   return result;
 }
 
-async function downloadMedia(mediaUrl: string): Promise<ArrayBuffer> {
-  console.log("Downloading media:", mediaUrl);
+async function downloadMedia(mediaRef: string): Promise<ArrayBuffer> {
+  console.log("Downloading media, ref:", mediaRef);
 
-  if (!mediaUrl.startsWith("http")) {
-    const apiUrl = `${WAPI_BASE}/media/${mediaUrl}`;
-    const res = await fetch(apiUrl, {
+  // Method 1: If it's a full URL, download directly
+  if (mediaRef.startsWith("http")) {
+    const res = await fetch(mediaRef, {
       headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
     });
-    if (!res.ok) throw new Error(`WAPI media failed (${res.status})`);
-    return res.arrayBuffer();
+    if (res.ok) return res.arrayBuffer();
+
+    // Try without auth
+    const res2 = await fetch(mediaRef);
+    if (res2.ok) return res2.arrayBuffer();
+
+    throw new Error(`Direct URL download failed: ${res.status}`);
   }
 
-  let res = await fetch(mediaUrl, {
-    headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
+  // Method 2: WAPI media endpoint - GET /media/{id}
+  // The id can be the message ID or media ID
+  const mediaRes = await fetch(`${WAPI_BASE}/media/${mediaRef}`, {
+    headers: { Authorization: `Bearer ${WAPI_TOKEN}`, Accept: "*/*" },
   });
-  if (!res.ok) res = await fetch(mediaUrl);
-  if (!res.ok) throw new Error(`Media download failed (${res.status})`);
-  return res.arrayBuffer();
+
+  if (mediaRes.ok) {
+    const contentType = mediaRes.headers.get("content-type") || "";
+    // If it returns JSON, it might contain a link
+    if (contentType.includes("json")) {
+      const json = await mediaRes.json();
+      console.log("Media API returned JSON:", JSON.stringify(json).slice(0, 300));
+      const link = json.link || json.url || json.data?.link;
+      if (link) {
+        const dlRes = await fetch(link);
+        if (dlRes.ok) return dlRes.arrayBuffer();
+      }
+      throw new Error("Media API returned JSON without downloadable link");
+    }
+    // Otherwise it's the actual binary
+    return mediaRes.arrayBuffer();
+  }
+
+  throw new Error(`Media download failed for ${mediaRef}: ${mediaRes.status}`);
 }
 
 // ─── Speech-to-Text via OpenAI Whisper ───────────────────
@@ -121,7 +144,7 @@ async function findEmployeeByPhone(phone: string) {
 
 // ─── Conversation persistence ────────────────────────────
 
-async function loadHistory(phone: string, limit = 12): Promise<ConversationEntry[]> {
+async function loadHistory(phone: string, limit = 6): Promise<ConversationEntry[]> {
   const { data } = await supabase
     .from("whatsapp_messages")
     .select("direction, message_body")
@@ -637,30 +660,34 @@ function parseWapiPayload(payload: any): ParsedMsg[] {
   const msgs: ParsedMsg[] = [];
   const messageList = payload.messages || [];
 
+  // Deduplicate: WAPI often sends the same message twice
+  const seenIds = new Set<string>();
+
   for (const m of messageList) {
     const from = (m.from || m.chat_id || "").replace("@s.whatsapp.net", "");
     if (!from || m.from_me) continue;
+
+    // Skip duplicates
+    if (m.id && seenIds.has(m.id)) continue;
+    if (m.id) seenIds.add(m.id);
 
     const parsed: ParsedMsg = { from, type: m.type || "text", messageId: m.id };
 
     if (m.type === "text" || (!m.type && m.text)) {
       parsed.body = m.text?.body || m.body || m.text;
     } else if (m.type === "image") {
-      // WAPI sends image data in various formats - try all known paths
+      // WAPI image structure: m.image.link is the direct download URL
       parsed.mediaUrl = m.image?.link || m.image?.url || m.image?.id
-        || m.media?.link || m.media?.url
-        || m.link || m.url;
+        || m.media?.link || m.media?.url;
       parsed.caption = m.image?.caption || m.caption;
-      // Log entire message structure for debugging
-      console.log("IMAGE MSG FULL:", JSON.stringify(m).slice(0, 1000));
+      console.log("IMAGE:", JSON.stringify(m.image || {}).slice(0, 500));
     } else if (m.type === "document") {
+      parsed.mediaUrl = m.document?.link || m.document?.url || m.document?.id;
       parsed.caption = m.document?.filename || m.document?.caption;
     } else if (m.type === "voice" || m.type === "audio" || m.type === "ptt") {
-      // Voice messages → will be transcribed
       parsed.audioUrl = m.audio?.link || m.audio?.url || m.audio?.id
         || m.voice?.link || m.voice?.url || m.voice?.id
         || m.ptt?.link || m.ptt?.url || m.ptt?.id;
-      console.log("Audio payload:", JSON.stringify(m.audio || m.voice || m.ptt));
     } else if (m.type === "video") {
       parsed.mediaUrl = m.video?.link || m.video?.url;
       parsed.caption = m.video?.caption;
@@ -688,8 +715,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const payload = await req.json();
-    // Log full payload for debugging image issues
-    console.log("WEBHOOK PAYLOAD:", JSON.stringify(payload).slice(0, 2000));
+
+    // Ignore status updates (delivered, read, etc.) - only process messages
+    if (payload.statuses || payload.event === "statuses" || (!payload.messages && !payload.message)) {
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log("WEBHOOK:", JSON.stringify(payload).slice(0, 1500));
     const incoming = parseWapiPayload(payload);
 
     if (incoming.length === 0) {
@@ -700,7 +734,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     for (const msg of incoming) {
       const phone = msg.from;
-      console.log(`WhatsApp von ${phone}: ${msg.body || msg.caption || `[${msg.type}]`}`);
+      console.log(`WhatsApp von ${phone}: ${msg.body || msg.caption || `[${msg.type}]`} (id: ${msg.messageId})`);
+
+      // Skip if this exact message was already processed (cross-request dedup)
+      if (msg.messageId) {
+        const { data: existing } = await supabase
+          .from("whatsapp_messages")
+          .select("id")
+          .eq("phone", phone)
+          .eq("message_body", msg.body || msg.caption || `[${msg.type}]`)
+          .gte("created_at", new Date(Date.now() - 30000).toISOString()) // within last 30 sec
+          .limit(1);
+        if (existing && existing.length > 0) {
+          console.log(`Duplicate message skipped: ${msg.messageId}`);
+          continue;
+        }
+      }
 
       const emp = await findEmployeeByPhone(phone);
 
@@ -741,54 +790,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
           ? `[Foto gesendet] ${msg.caption}`
           : "[Foto gesendet ohne Beschreibung]";
 
-        // Download image IMMEDIATELY (WAPI URLs expire quickly)
-        // Try multiple methods to get the image
-        const mediaSource = msg.mediaUrl || msg.messageId;
-        if (mediaSource) {
+        // Download image IMMEDIATELY
+        const mediaRef = msg.mediaUrl || msg.messageId;
+        if (mediaRef) {
           try {
-            console.log("Pre-downloading image, source:", mediaSource);
-
-            if (msg.mediaUrl && msg.mediaUrl.startsWith("http")) {
-              // Direct URL
-              cachedImageBuffer = await downloadMedia(msg.mediaUrl);
-            } else {
-              // Use WAPI media endpoint with message ID
-              const mediaId = msg.mediaUrl || msg.messageId;
-              console.log("Trying WAPI /media endpoint with ID:", mediaId);
-              const res = await fetch(`${WAPI_BASE}/media/${mediaId}`, {
-                headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
-              });
-              if (res.ok) {
-                cachedImageBuffer = await res.arrayBuffer();
-              } else {
-                // Fallback: try /messages/{id}/download
-                console.log("Trying /messages download endpoint...");
-                const res2 = await fetch(`${WAPI_BASE}/messages/${msg.messageId}/download`, {
-                  headers: { Authorization: `Bearer ${WAPI_TOKEN}` },
-                });
-                if (res2.ok) {
-                  cachedImageBuffer = await res2.arrayBuffer();
-                } else {
-                  console.error("All media download methods failed");
-                }
-              }
-            }
-
-            if (cachedImageBuffer) {
-              console.log(`Image cached: ${cachedImageBuffer.byteLength} bytes`);
-            } else {
-              console.error("Image buffer is null after all attempts");
-            }
+            cachedImageBuffer = await downloadMedia(mediaRef);
+            console.log(`Image cached: ${cachedImageBuffer.byteLength} bytes`);
           } catch (e: any) {
-            console.error("Image pre-download failed:", e);
+            console.error("Image download failed:", e.message);
+            userMessage = msg.caption
+              ? `[Foto gesendet aber Download fehlgeschlagen] ${msg.caption}`
+              : "[Foto gesendet aber konnte nicht heruntergeladen werden]";
           }
-        }
-
-        // If image download failed, tell GPT there's no image
-        if (!cachedImageBuffer) {
-          userMessage = msg.caption
-            ? `[Foto gesendet aber Download fehlgeschlagen] ${msg.caption}`
-            : "[Foto gesendet aber konnte nicht heruntergeladen werden]";
+        } else {
+          userMessage = "[Foto gesendet aber keine Medien-Referenz gefunden]";
         }
       } else {
         userMessage = msg.body || "";
