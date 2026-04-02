@@ -343,18 +343,19 @@ const tools = [
     function: {
       name: "stunden_buchen",
       description:
-        "Bucht Arbeitsstunden auf ein Projekt. WICHTIG: Pruefe vorher im Kontext wie viele Stunden heute schon gebucht sind. Die Summe aller Buchungen darf die Regelarbeitszeit (8h) nicht ueberschreiten.",
+        "Bucht Arbeitsstunden auf ein Projekt. Kann entweder project_id (UUID) ODER project_name (Suchbegriff) verwenden. Bei project_name wird serverseitig das passende Projekt gesucht.",
       parameters: {
         type: "object",
         properties: {
-          project_id: { type: "string", description: "UUID des Projekts" },
+          project_id: { type: "string", description: "UUID des Projekts aus der Projektliste (bevorzugt)" },
+          project_name: { type: "string", description: "Projektname oder Teilname zum Suchen (Alternative zu project_id)" },
           stunden: { type: "number", description: "Stundenanzahl" },
           taetigkeit: { type: "string", description: "Beschreibung der Taetigkeit" },
           datum: { type: "string", description: "Datum YYYY-MM-DD, Standard = heute" },
           start_time: { type: "string", description: "Startzeit HH:MM (optional)" },
           end_time: { type: "string", description: "Endzeit HH:MM (optional)" },
         },
-        required: ["project_id", "stunden", "taetigkeit", "datum"],
+        required: ["stunden", "taetigkeit", "datum"],
       },
     },
   },
@@ -362,14 +363,15 @@ const tools = [
     type: "function" as const,
     function: {
       name: "foto_hochladen",
-      description: "Laedt ein empfangenes Foto auf ein Projekt hoch.",
+      description: "Laedt ein empfangenes Foto auf ein Projekt hoch. Kann project_id ODER project_name verwenden.",
       parameters: {
         type: "object",
         properties: {
-          project_id: { type: "string", description: "UUID des Projekts" },
+          project_id: { type: "string", description: "UUID des Projekts (bevorzugt)" },
+          project_name: { type: "string", description: "Projektname oder Teilname (Alternative)" },
           beschreibung: { type: "string", description: "Beschreibung des Fotos" },
         },
-        required: ["project_id"],
+        required: [],
       },
     },
   },
@@ -409,8 +411,46 @@ async function executeTool(
 ): Promise<string> {
   const today = new Date().toISOString().split("T")[0];
 
+  // Resolve project_name to project_id if needed
+  if (!input.project_id && input.project_name) {
+    const searchTerm = input.project_name.trim();
+    const { data: matches } = await supabase
+      .from("projects")
+      .select("id, name")
+      .eq("status", "aktiv")
+      .ilike("name", `%${searchTerm}%`)
+      .limit(5);
+
+    if (!matches || matches.length === 0) {
+      // Try even fuzzier: split search term and match any word
+      const words = searchTerm.split(/\s+/).filter((w: string) => w.length > 2);
+      let fuzzyMatch = null;
+      if (words.length > 0) {
+        const { data: allProjects } = await supabase
+          .from("projects").select("id, name").eq("status", "aktiv");
+        fuzzyMatch = (allProjects || []).find((p: any) =>
+          words.some((w: string) => p.name.toLowerCase().includes(w.toLowerCase()))
+        );
+      }
+      if (fuzzyMatch) {
+        input.project_id = fuzzyMatch.id;
+      } else {
+        const { data: allP } = await supabase.from("projects").select("name").eq("status", "aktiv");
+        const list = (allP || []).map((p: any, i: number) => `${i + 1}. ${p.name}`).join("\n");
+        return `FEHLER: Kein Projekt "${searchTerm}" gefunden. Aktive Projekte:\n${list}`;
+      }
+    } else if (matches.length === 1) {
+      input.project_id = matches[0].id;
+    } else {
+      // Multiple matches - pick the best one (shortest name that contains the search)
+      const best = matches.sort((a: any, b: any) => a.name.length - b.name.length)[0];
+      input.project_id = best.id;
+    }
+  }
+
   switch (name) {
     case "stunden_buchen": {
+      if (!input.project_id) return "FEHLER: Kein Projekt angegeben.";
       const h = input.stunden;
       const datum = input.datum || today;
 
@@ -472,6 +512,7 @@ async function executeTool(
     }
 
     case "foto_hochladen": {
+      if (!input.project_id) return "FEHLER: Kein Projekt angegeben. Bitte Projektname nennen.";
       if (!cachedImageBuffer) return "FEHLER: Kein Foto vorhanden.";
       try {
         const buf = cachedImageBuffer;
@@ -618,30 +659,50 @@ Du hast oben den KOMPLETTEN Wochenueberblick dieses Mitarbeiters. Nutze dieses W
 Mo–Do: 8,5h | Fr: 5,0h | Wochensoll: 39h
 Nicht mehr als Tagessoll buchen (Ueberstunden nur wenn ausdruecklich bestaetigt).
 
-═══ STUNDENBUCHUNG ═══
-- Projekt + Stunden klar → buchen, Bestaetigung + Reststand zeigen + Projektliste fuer Rest
-- Projekt unklar → nummerierte Liste, "Antworte mit der Nummer"
-- Nur "Stunden schreiben" → Projektliste zeigen + Tagessoll nennen
-- Nummern-Antwort (z.B. "3") → Projekt Nr. 3 aus letzter Liste
-- Taetigkeit fehlt → kurz nachfragen
-- Fuer vergangene Tage buchen: Mitarbeiter kann auch z.B. "gestern 8h Werkstatt" sagen
+═══ STUNDENBUCHUNG (WICHTIGSTE FUNKTION) ═══
 
-═══ SPRACHNACHRICHTEN ═══
-Werden automatisch transkribiert. Bei Unklarheiten sinnvoll interpretieren.
+Du bist ein INTELLIGENTER Agent. Du verstehst natuerliche Sprache und ordnest Projekte automatisch zu.
+
+PROJEKTERKENNUNG – so gehst du vor:
+- "4h auf Müller" → matche "Müller" gegen die Projektliste → "Bauvorhaben Müller" → DIREKT buchen
+- "8h Sonnenhof Kabel verlegt" → "Wohnanlage Sonnenhof" → buchen
+- "6 Stunden Industriehalle" → "Industriehalle Graz-Süd" → buchen
+- "Heute war ich auf der Steiner-Baustelle, 8h" → "Bauvorhaben Steiner" → buchen
+- "Gestern 4h auf der Halle in Graz" → "Industriehalle Graz-Süd", gestern → buchen
+- Auch Teilnamen, Spitznamen, Abkuerzungen erkennen!
+- Bei Sprachnachrichten: Transkriptionsfehler intelligent interpretieren
+
+WENN Projekt EINDEUTIG erkennbar → SOFORT buchen, NICHT erst nachfragen!
+WENN Projekt NICHT zuordenbar (z.B. "auf der Baustelle") → Projektliste zeigen
+WENN Nummer als Antwort (z.B. "3") → Projekt Nr. 3 aus der Liste im Kontext
+
+ABLAUF:
+1. Stunden + Projekt erkannt → buchen → Bestaetigung + Reststand
+2. Nur Stunden → Plantafel pruefen, sonst Projektliste zeigen
+3. Nur "Stunden schreiben" → Projektliste + Tagessoll
+4. Taetigkeit fehlt → sinnvollen Standardwert nehmen (z.B. "Allgemeine Arbeiten") oder kurz fragen
+5. Vergangene Tage: "gestern 8h Werkstatt" → korrektes Datum berechnen und buchen
 
 ═══ FOTOS ═══
-Mit Beschreibung → Projekt zuordnen. Ohne → nach Projekt fragen.
+- Mit Beschreibung → Projektname erkennen → hochladen
+- "Foto fuer Müller" → "Bauvorhaben Müller" → hochladen
+- Ohne Beschreibung → nach Projekt fragen
+
+═══ SPRACHNACHRICHTEN ═══
+Werden transkribiert. Transkriptionsfehler intelligent interpretieren (z.B. "Mühler" = "Müller").
 
 ═══ KORREKTUREN ═══
-"Stimmt nicht" / "Loesch das" → letzte_buchung_loeschen
+"Das war falsch" / "Loesch das" → letzte_buchung_loeschen
 
 ═══ EINTEILUNG ═══
-"Wo muss ich hin?" → Plantafel zeigen
+"Wo muss ich hin?" / "Einteilung?" → Plantafel mit Zeiten zeigen
 
 ═══ REGELN ═══
 - IMMER Deutsch, kurz, knapp
-- Niemals UUIDs oder technische Details
-- Immer Projektliste mitschicken wenn Reststunden offen`;
+- Sei PROAKTIV: nicht unnoetig nachfragen wenn du zuordnen kannst
+- Niemals UUIDs oder technische Details zeigen
+- Nach jeder Buchung: Reststand + Projektliste wenn noch offen
+- Du bist ein smarter Assistent, kein dummes Menue-System`;
 }
 
 // ─── Parse WAPI webhook ──────────────────────────────────
