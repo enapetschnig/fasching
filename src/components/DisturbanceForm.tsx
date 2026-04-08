@@ -15,6 +15,7 @@ import { useBreakValidation } from "@/hooks/useBreakValidation";
 import { format } from "date-fns";
 import { MultiEmployeeSelect } from "@/components/MultiEmployeeSelect";
 import { blockSpansBreakfast, blockSpansLunch, BREAKFAST_BREAK_START, BREAKFAST_BREAK_END, LUNCH_BREAK_START, LUNCH_BREAK_END, LUNCH_BREAK_MINUTES } from "@/lib/workingHours";
+import { VoiceRecorder } from "@/components/VoiceRecorder";
 
 type MaterialEntry = {
   id: string;
@@ -789,13 +790,38 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
               Arbeitsdetails
             </h3>
             <div className="space-y-3">
+              {/* KI-Spracheingabe */}
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-blue-800 dark:text-blue-200">KI-Spracheingabe: Tätigkeiten und Material diktieren</p>
+                <VoiceRecorder
+                  disabled={saving}
+                  onResult={(data) => {
+                    if (data.beschreibung) {
+                      setFormData((prev) => ({
+                        ...prev,
+                        beschreibung: data.beschreibung,
+                        kundeName: data.kundeName || prev.kundeName,
+                        kundeAdresse: data.kundeAdresse || prev.kundeAdresse,
+                      }));
+                    }
+                    if (data.materials && data.materials.length > 0) {
+                      setMaterials(data.materials.map((m) => ({
+                        id: crypto.randomUUID(),
+                        material: m.material,
+                        menge: m.menge,
+                      })));
+                    }
+                  }}
+                />
+              </div>
+
               <div>
                 <Label htmlFor="beschreibung">Durchgeführte Arbeit *</Label>
                 <Textarea
                   id="beschreibung"
                   value={formData.beschreibung}
                   onChange={(e) => setFormData({ ...formData, beschreibung: e.target.value })}
-                  placeholder="Beschreiben Sie die durchgeführten Arbeiten..."
+                  placeholder="Beschreiben Sie die durchgeführten Arbeiten oder nutzen Sie die Spracheingabe oben..."
                   rows={4}
                   required
                 />
