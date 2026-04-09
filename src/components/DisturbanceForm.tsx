@@ -60,13 +60,11 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     datum: format(new Date(), "yyyy-MM-dd"),
     startTime: "08:00",
     endTime: "10:00",
-    pauseMinutes: 0,
+    pauseStart: "",
+    pauseEnd: "",
     kundeName: "",
-    kundeEmail: "",
     kundeAdresse: "",
-    kundeTelefon: "",
     beschreibung: "",
-    notizen: "",
   });
 
   const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
@@ -121,9 +119,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
       setFormData(prev => ({
         ...prev,
         kundeName: data.kunde_name || prev.kundeName,
-        kundeEmail: data.kunde_email || prev.kundeEmail,
         kundeAdresse: data.adresse || prev.kundeAdresse,
-        kundeTelefon: data.kunde_telefon || prev.kundeTelefon,
       }));
     }
   };
@@ -134,13 +130,11 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: editData.datum,
         startTime: editData.start_time.slice(0, 5),
         endTime: editData.end_time.slice(0, 5),
-        pauseMinutes: editData.pause_minutes,
+        pauseStart: "",
+        pauseEnd: "",
         kundeName: editData.kunde_name,
-        kundeEmail: editData.kunde_email || "",
         kundeAdresse: editData.kunde_adresse || "",
-        kundeTelefon: editData.kunde_telefon || "",
         beschreibung: editData.beschreibung,
-        notizen: editData.notizen || "",
       });
       setSelectedProjectId(editData.project_id || null);
       setWorkType(editData.project_id ? "projekt" : "kunde");
@@ -151,13 +145,11 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
         datum: format(new Date(), "yyyy-MM-dd"),
         startTime: "08:00",
         endTime: "10:00",
-        pauseMinutes: 0,
+        pauseStart: "",
+        pauseEnd: "",
         kundeName: "",
-        kundeEmail: "",
         kundeAdresse: "",
-        kundeTelefon: "",
         beschreibung: "",
-        notizen: "",
       });
       setSelectedEmployees([]);
       setMaterials([]);
@@ -196,12 +188,20 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     }
   };
 
+  const getPauseMinutes = (): number => {
+    if (hasLunchBreak) return LUNCH_BREAK_MINUTES;
+    if (formData.pauseStart && formData.pauseEnd) {
+      const [psH, psM] = formData.pauseStart.split(":").map(Number);
+      const [peH, peM] = formData.pauseEnd.split(":").map(Number);
+      return Math.max(0, (peH * 60 + peM) - (psH * 60 + psM));
+    }
+    return 0;
+  };
+
   const calculateHours = (): number => {
     const [startH, startM] = formData.startTime.split(":").map(Number);
     const [endH, endM] = formData.endTime.split(":").map(Number);
-    // Lunch break replaces the old pauseMinutes when checked
-    const breakMinutes = hasLunchBreak ? LUNCH_BREAK_MINUTES : formData.pauseMinutes;
-    const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM) - breakMinutes;
+    const totalMinutes = (endH * 60 + endM) - (startH * 60 + startM) - getPauseMinutes();
     return Math.max(0, totalMinutes / 60);
   };
 
@@ -261,14 +261,14 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
       datum: formData.datum,
       start_time: formData.startTime,
       end_time: formData.endTime,
-      pause_minutes: formData.pauseMinutes,
+      pause_minutes: getPauseMinutes(),
       stunden,
       kunde_name: formData.kundeName.trim(),
-      kunde_email: formData.kundeEmail.trim() || null,
+      kunde_email: null as string | null,
       kunde_adresse: formData.kundeAdresse.trim() || null,
-      kunde_telefon: formData.kundeTelefon.trim() || null,
+      kunde_telefon: null as string | null,
       beschreibung: formData.beschreibung.trim(),
-      notizen: formData.notizen.trim() || null,
+      notizen: null as string | null,
       project_id: selectedProjectId || null,
       has_breakfast_break: hasBreakfastBreak,
       has_lunch_break: hasLunchBreak,
@@ -691,13 +691,21 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                 </>
               )}
               <div>
-                <Label htmlFor="pauseMinutes">Pause (Minuten)</Label>
+                <Label>Pause von</Label>
                 <Input
-                  id="pauseMinutes"
-                  type="number"
-                  min="0"
-                  value={formData.pauseMinutes}
-                  onChange={(e) => setFormData({ ...formData, pauseMinutes: parseInt(e.target.value) || 0 })}
+                  type="time"
+                  value={formData.pauseStart}
+                  onChange={(e) => setFormData({ ...formData, pauseStart: e.target.value })}
+                  placeholder="z.B. 12:00"
+                />
+              </div>
+              <div>
+                <Label>Pause bis</Label>
+                <Input
+                  type="time"
+                  value={formData.pauseEnd}
+                  onChange={(e) => setFormData({ ...formData, pauseEnd: e.target.value })}
+                  placeholder="z.B. 12:30"
                 />
               </div>
               <div className="flex items-end">
@@ -761,30 +769,6 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                   onChange={(e) => setFormData({ ...formData, kundeName: e.target.value })}
                   placeholder="Max Mustermann"
                   required
-                />
-              </div>
-              <div>
-                <Label htmlFor="kundeEmail" className="flex items-center gap-1">
-                  <Mail className="h-4 w-4" /> E-Mail (optional)
-                </Label>
-                <Input
-                  id="kundeEmail"
-                  type="email"
-                  value={formData.kundeEmail}
-                  onChange={(e) => setFormData({ ...formData, kundeEmail: e.target.value })}
-                  placeholder="kunde@email.at"
-                />
-              </div>
-              <div>
-                <Label htmlFor="kundeTelefon" className="flex items-center gap-1">
-                  <Phone className="h-4 w-4" /> Telefon (optional)
-                </Label>
-                <Input
-                  id="kundeTelefon"
-                  type="tel"
-                  value={formData.kundeTelefon}
-                  onChange={(e) => setFormData({ ...formData, kundeTelefon: e.target.value })}
-                  placeholder="+43 664 ..."
                 />
               </div>
               <div>
@@ -857,16 +841,6 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                   placeholder="Beschreiben Sie die durchgeführten Arbeiten oder nutzen Sie die Spracheingabe oben..."
                   rows={4}
                   required
-                />
-              </div>
-              <div>
-                <Label htmlFor="notizen">Notizen (optional)</Label>
-                <Textarea
-                  id="notizen"
-                  value={formData.notizen}
-                  onChange={(e) => setFormData({ ...formData, notizen: e.target.value })}
-                  placeholder="Zusätzliche Bemerkungen..."
-                  rows={2}
                 />
               </div>
             </div>

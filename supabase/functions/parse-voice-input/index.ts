@@ -40,7 +40,7 @@ Du erhältst eine Sprachaufnahme eines Technikers, der einen Arbeitsbericht dikt
 Extrahiere daraus folgende Informationen und gib NUR valides JSON zurück:
 
 {
-  "beschreibung": "Zusammenfassung der durchgeführten Tätigkeiten als Fließtext",
+  "beschreibung": "Formlose, stichpunktartige Auflistung der Tätigkeiten",
   "materials": [
     { "material": "Materialname", "menge": "Menge mit Einheit" }
   ],
@@ -49,7 +49,10 @@ Extrahiere daraus folgende Informationen und gib NUR valides JSON zurück:
 }
 
 Regeln:
-- Beschreibung: Fachlich korrekt formulieren, kurz und prägnant. Aus der Ich-Perspektive in die dritte Person umwandeln.
+- Beschreibung: FORMLOS und KURZ. Keine ganzen Sätze, keine dritte Person, kein "Der Techniker hat...".
+  Stattdessen einfach die Tätigkeit auflisten, z.B.:
+  "Montage von 5 Heizungsverteilern\nAnschluss Fußbodenheizung EG\nDichtheitsprüfung durchgeführt"
+  Verwende Zeilenumbrüche (\\n) zwischen verschiedenen Tätigkeiten.
 - Material: Jedes erwähnte Material mit Menge als eigenen Eintrag. Typische Materialien: Rohre, Fittings, Ventile, Thermostate, Pumpen, Dichtungen, Isolierung, etc.
 - Wenn keine Materialien erwähnt werden: leeres Array []
 - Wenn kein Kundenname erwähnt: null
