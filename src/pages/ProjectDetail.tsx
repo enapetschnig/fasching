@@ -27,7 +27,7 @@ const bucketMap: Record<DocumentType, string> = {
 
 const titleMap: Record<DocumentType, string> = {
   plans: "Pläne",
-  reports: "Arbeitsberichte",
+  reports: "Berichte & PDFs",
   photos: "Fotos",
   chef: "🔒 Chefordner",
 };
@@ -237,8 +237,8 @@ const ProjectDetail = () => {
           </CardHeader>
 
           <CardContent className="p-6">
-            {/* Upload section - Admin only */}
-            {isAdmin && (
+            {/* Upload section - Admin only, not for reports (auto-generated from Arbeitsberichte) */}
+            {isAdmin && type !== "reports" && (
               <div className="mb-6">
                 <label htmlFor="file-upload" className="cursor-pointer">
                   <div className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors">

@@ -183,15 +183,11 @@ export function FileViewer({
               />
             </div>
           ) : actualFileType === "pdf" ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <p className="text-muted-foreground text-center">
-                PDF-Vorschau nicht verfügbar
-              </p>
-              <Button onClick={handleDownload} disabled={loading} size="lg">
-                <Download className="w-4 h-4 mr-2" />
-                PDF herunterladen
-              </Button>
-            </div>
+            <iframe
+              src={signedUrl}
+              className="w-full h-full rounded-lg border-0"
+              title={fileName}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <p className="text-muted-foreground">
