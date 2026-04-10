@@ -100,198 +100,285 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
-  const m = 20; // margin
-  const cw = pw - 2 * m; // content width
+  const m = 18;
+  const cw = pw - 2 * m;
   let y = m;
-  const blue = [37, 99, 168] as const;
-  const gray = [120, 120, 120] as const;
-  const black = [30, 30, 30] as const;
-  const lightGray = [245, 245, 245] as const;
+  const blue: [number, number, number] = [37, 99, 168];
+  const darkBlue: [number, number, number] = [20, 60, 120];
+  const textColor: [number, number, number] = [40, 40, 40];
+  const labelColor: [number, number, number] = [110, 110, 110];
+  const lineColor: [number, number, number] = [210, 210, 210];
+  const bgLight: [number, number, number] = [248, 249, 250];
 
   const addFooter = () => {
-    doc.setFontSize(7);
-    doc.setTextColor(...gray);
-    doc.setDrawColor(200, 200, 200);
-    doc.line(m, ph - 18, m + cw, ph - 18);
-    doc.text("FASCHING Geb\u00e4udetechnik \u2022 Heizung \u2022 K\u00e4lte \u2022 L\u00fcftung \u2022 Sanit\u00e4r \u2022 Service", m, ph - 13);
-    doc.text(`Erstellt: ${new Date().toLocaleDateString("de-AT")}`, m + cw, ph - 13, { align: "right" });
+    // Thin line
+    doc.setDrawColor(...lineColor);
+    doc.setLineWidth(0.3);
+    doc.line(m, ph - 16, m + cw, ph - 16);
+    // Left: company
+    doc.setFontSize(6.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...labelColor);
+    doc.text("FASCHING Geb\u00e4udetechnik  |  Heizung \u2022 K\u00e4lte \u2022 L\u00fcftung \u2022 Sanit\u00e4r \u2022 Service", m, ph - 12);
+    // Right: date + page
+    const pageNum = (doc as any).internal.getCurrentPageInfo().pageNumber;
+    doc.text(`Seite ${pageNum}  |  ${new Date().toLocaleDateString("de-AT")}`, m + cw, ph - 12, { align: "right" });
   };
 
   const checkPage = (needed: number) => {
-    if (y + needed > ph - 25) { addFooter(); doc.addPage(); y = m; }
+    if (y + needed > ph - 22) { addFooter(); doc.addPage(); y = m; }
   };
 
-  const sectionTitle = (title: string) => {
-    checkPage(15);
+  const sectionHeader = (title: string) => {
+    checkPage(14);
+    y += 3;
+    // Blue left bar + title
+    doc.setFillColor(...blue);
+    doc.rect(m, y - 4, 2, 6, "F");
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(...blue);
-    doc.text(title.toUpperCase(), m, y);
-    y += 1;
-    doc.setDrawColor(...blue);
-    doc.setLineWidth(0.5);
-    doc.line(m, y, m + cw, y);
-    y += 6;
-    doc.setTextColor(...black);
+    doc.setTextColor(...darkBlue);
+    doc.text(title, m + 5, y);
+    y += 5;
+    doc.setTextColor(...textColor);
   };
 
-  const field = (label: string, value: string, bold = false) => {
+  const fieldRow = (label: string, value: string, options?: { bold?: boolean; half?: "left" | "right" }) => {
     checkPage(6);
-    doc.setFontSize(9);
+    const xStart = options?.half === "right" ? m + cw / 2 : m;
+    const labelW = 32;
+    doc.setFontSize(8.5);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(...gray);
-    doc.text(label, m, y);
-    doc.setTextColor(...black);
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-    doc.text(value, m + 38, y);
-    y += 5.5;
+    doc.setTextColor(...labelColor);
+    doc.text(label, xStart + 5, y);
+    doc.setTextColor(...textColor);
+    doc.setFont("helvetica", options?.bold ? "bold" : "normal");
+    doc.text(value, xStart + labelW + 5, y);
+    if (!options?.half || options.half === "right") y += 5.5;
   };
 
-  // === HEADER ===
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...blue);
-  doc.text("FASCHING", m, y);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(...gray);
-  doc.text("GEB\u00c4UDETECHNIK", m + 47, y);
-  y += 5;
-  doc.setFontSize(7);
-  doc.text("Heizung \u2022 K\u00e4lte \u2022 L\u00fcftung \u2022 Sanit\u00e4r \u2022 Service", m, y);
-  y += 3;
-  doc.setDrawColor(...blue);
-  doc.setLineWidth(0.8);
-  doc.line(m, y, m + cw, y);
-  y += 8;
+  // ========================================
+  // HEADER BAR
+  // ========================================
+  doc.setFillColor(...blue);
+  doc.rect(0, 0, pw, 28, "F");
 
-  // === TITLE ===
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(...black);
-  doc.text("Arbeitsbericht", m, y);
-  // Date right-aligned
-  doc.setFontSize(10);
+  doc.setTextColor(255, 255, 255);
+  doc.text("FASCHING", m, 12);
+
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...gray);
-  doc.text(formatDate(disturbance.datum), m + cw, y, { align: "right" });
-  y += 12;
+  doc.setTextColor(200, 220, 255);
+  doc.text("GEB\u00c4UDETECHNIK", m + 45, 12);
 
-  // === KUNDENDATEN ===
-  sectionTitle("Kundendaten");
-  field("Kunde", disturbance.kunde_name, true);
-  if (disturbance.kunde_adresse) field("Adresse", disturbance.kunde_adresse);
-  y += 4;
+  doc.setFontSize(7);
+  doc.setTextColor(180, 200, 240);
+  doc.text("Heizung  \u2022  K\u00e4lte  \u2022  L\u00fcftung  \u2022  Sanit\u00e4r  \u2022  Service", m, 18);
 
-  // === EINSATZDATEN ===
-  sectionTitle("Einsatzdaten");
+  // Arbeitsbericht title right
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(255, 255, 255);
+  doc.text("Arbeitsbericht", m + cw, 13, { align: "right" });
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(200, 220, 255);
+  doc.text(formatDate(disturbance.datum), m + cw, 20, { align: "right" });
+
+  y = 36;
+
+  // ========================================
+  // KUNDENDATEN + EINSATZDATEN (zwei Spalten)
+  // ========================================
+  // Background box
+  doc.setFillColor(...bgLight);
+  doc.setDrawColor(...lineColor);
+  doc.setLineWidth(0.3);
+  const boxH = 38;
+  doc.roundedRect(m, y - 3, cw, boxH, 2, 2, "FD");
+
+  const leftCol = m;
+  const rightCol = m + cw / 2 + 2;
+  const yBox = y;
+
+  // Left: Kundendaten
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...blue);
+  doc.text("KUNDE", leftCol + 5, yBox + 2);
+  doc.setTextColor(...textColor);
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.text(disturbance.kunde_name, leftCol + 5, yBox + 9);
+  if (disturbance.kunde_adresse) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...labelColor);
+    doc.text(disturbance.kunde_adresse, leftCol + 5, yBox + 15);
+  }
+
+  // Vertical divider
+  doc.setDrawColor(...lineColor);
+  doc.line(m + cw / 2, yBox - 1, m + cw / 2, yBox + boxH - 4);
+
+  // Right: Einsatzdaten
   const st = disturbance.start_time.slice(0, 5);
   const et = disturbance.end_time.slice(0, 5);
-  field("Datum", formatDate(disturbance.datum));
-  field("Arbeitszeit", `${st} \u2013 ${et} Uhr`);
-  if (disturbance.pause_minutes > 0) field("Pause", `${disturbance.pause_minutes} Min.`);
-  field("Stunden", `${disturbance.stunden.toFixed(2)} h`, true);
-  if (technicians.length === 1) {
-    field("Techniker", technicians[0]);
-  } else if (technicians.length > 1) {
-    field("Techniker", technicians.join(", "));
-  }
-  y += 4;
 
-  // === DURCHGEFÜHRTE ARBEITEN ===
-  sectionTitle("Durchgef\u00fchrte Arbeiten");
-  doc.setFontSize(10);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...blue);
+  doc.text("EINSATZ", rightCol, yBox + 2);
+
+  doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...black);
-  const beschreibungLines = doc.splitTextToSize(disturbance.beschreibung, cw);
-  for (const line of beschreibungLines) {
-    checkPage(6);
-    doc.text(line, m, y);
+  doc.setTextColor(...labelColor);
+  doc.text("Arbeitszeit", rightCol, yBox + 9);
+  doc.setTextColor(...textColor);
+  doc.setFont("helvetica", "bold");
+  doc.text(`${st} \u2013 ${et} Uhr`, rightCol + 30, yBox + 9);
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...labelColor);
+  doc.text("Stunden", rightCol, yBox + 15);
+  doc.setTextColor(...textColor);
+  doc.setFont("helvetica", "bold");
+  doc.text(`${disturbance.stunden.toFixed(2)} h`, rightCol + 30, yBox + 15);
+
+  if (disturbance.pause_minutes > 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...labelColor);
+    doc.text("Pause", rightCol, yBox + 21);
+    doc.setTextColor(...textColor);
+    doc.text(`${disturbance.pause_minutes} Min.`, rightCol + 30, yBox + 21);
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...labelColor);
+  doc.text("Techniker", rightCol, yBox + (disturbance.pause_minutes > 0 ? 27 : 21));
+  doc.setTextColor(...textColor);
+  doc.setFont("helvetica", "normal");
+  const techText = technicians.length > 0 ? technicians.join(", ") : "-";
+  doc.text(techText, rightCol + 30, yBox + (disturbance.pause_minutes > 0 ? 27 : 21));
+
+  y = yBox + boxH + 6;
+
+  // ========================================
+  // DURCHGEFÜHRTE ARBEITEN
+  // ========================================
+  sectionHeader("Durchgef\u00fchrte Arbeiten");
+  doc.setFontSize(9.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...textColor);
+  const lines = doc.splitTextToSize(disturbance.beschreibung, cw - 5);
+  for (const line of lines) {
+    checkPage(5.5);
+    doc.text(line, m + 5, y);
     y += 5;
   }
-  y += 4;
+  y += 3;
 
-  // === MATERIAL ===
+  // ========================================
+  // MATERIAL
+  // ========================================
   if (materials && materials.length > 0) {
-    sectionTitle("Verwendetes Material");
+    sectionHeader("Verwendetes Material");
 
     // Table header
-    doc.setFillColor(...lightGray);
-    doc.rect(m, y - 4, cw, 7, "F");
+    doc.setFillColor(...darkBlue);
+    doc.roundedRect(m, y - 4.5, cw, 7.5, 1, 1, "F");
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(...black);
-    doc.text("Material", m + 2, y);
-    doc.text("Menge", m + cw - 2, y, { align: "right" });
-    y += 6;
+    doc.setTextColor(255, 255, 255);
+    doc.text("Material", m + 4, y);
+    doc.text("Menge", m + cw - 4, y, { align: "right" });
+    y += 7;
 
-    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     materials.forEach((mat, i) => {
       checkPage(7);
-      if (i % 2 === 1) {
-        doc.setFillColor(250, 250, 250);
+      // Alternating row
+      if (i % 2 === 0) {
+        doc.setFillColor(...bgLight);
         doc.rect(m, y - 4, cw, 7, "F");
       }
-      doc.setTextColor(...black);
-      doc.text(mat.material || "-", m + 2, y);
-      doc.setTextColor(...gray);
-      doc.text(mat.menge || "-", m + cw - 2, y, { align: "right" });
-      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...textColor);
+      doc.text(mat.material || "-", m + 4, y);
+      doc.setTextColor(...labelColor);
+      doc.text(mat.menge || "-", m + cw - 4, y, { align: "right" });
+      y += 6.5;
     });
-    y += 6;
+    // Bottom line
+    doc.setDrawColor(...lineColor);
+    doc.line(m, y - 2, m + cw, y - 2);
+    y += 5;
   }
 
-  // === FOTOS ===
+  // ========================================
+  // FOTOS
+  // ========================================
   if (photos && photos.length > 0 && photoImages.some(img => img !== null)) {
-    addFooter();
-    doc.addPage();
-    y = m;
-    sectionTitle("Fotodokumentation");
-
+    addFooter(); doc.addPage(); y = m;
+    sectionHeader("Fotodokumentation");
     for (let i = 0; i < photos.length; i++) {
-      const imageData = photoImages[i];
-      if (!imageData) continue;
-      checkPage(70);
+      const imgData = photoImages[i];
+      if (!imgData) continue;
+      checkPage(72);
       try {
-        doc.addImage(imageData, "JPEG", m, y, 80, 60);
-        y += 63;
+        // Photo with border
+        doc.setDrawColor(...lineColor);
+        doc.setLineWidth(0.3);
+        doc.rect(m, y - 1, 82, 62, "S");
+        doc.addImage(imgData, "JPEG", m + 1, y, 80, 60);
+        y += 64;
         doc.setFontSize(7);
-        doc.setTextColor(...gray);
+        doc.setTextColor(...labelColor);
         doc.text(photos[i].file_name, m, y);
         y += 8;
       } catch (e) { console.error("Error adding image:", e); }
     }
   }
 
-  // === UNTERSCHRIFT ===
-  checkPage(55);
-  sectionTitle("Kundenunterschrift");
+  // ========================================
+  // UNTERSCHRIFT
+  // ========================================
+  checkPage(60);
+  sectionHeader("Kundenunterschrift");
+  y += 2;
+
   if (disturbance.unterschrift_kunde) {
     try {
-      doc.addImage(disturbance.unterschrift_kunde, "PNG", m, y, 55, 22);
-      y += 25;
+      doc.addImage(disturbance.unterschrift_kunde, "PNG", m + 5, y, 55, 22);
+      y += 26;
     } catch (e) {
       doc.setFontSize(9);
       doc.setFont("helvetica", "italic");
-      doc.setTextColor(...gray);
-      doc.text("[Unterschrift nicht verf\u00fcgbar]", m, y + 8);
-      y += 15;
+      doc.setTextColor(...labelColor);
+      doc.text("[Unterschrift nicht verf\u00fcgbar]", m + 5, y + 8);
+      y += 18;
     }
   }
-  doc.setDrawColor(180, 180, 180);
-  doc.line(m, y, m + 60, y);
+
+  // Signature line
+  doc.setDrawColor(...textColor);
+  doc.setLineWidth(0.4);
+  doc.line(m + 5, y, m + 75, y);
   y += 4;
   doc.setFontSize(7);
-  doc.setTextColor(...gray);
-  doc.text("Datum, Unterschrift Kunde", m, y);
-  y += 8;
+  doc.setTextColor(...labelColor);
+  doc.text("Datum, Unterschrift Auftraggeber", m + 5, y);
+  y += 10;
 
-  doc.setFontSize(8);
+  // Confirmation
+  doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
-  doc.setTextColor(...gray);
-  const confirm = "Der Kunde best\u00e4tigt mit seiner Unterschrift die ordnungsgem\u00e4\u00dfe Durchf\u00fchrung der oben genannten Arbeiten.";
-  doc.text(doc.splitTextToSize(confirm, cw), m, y);
+  doc.setTextColor(...labelColor);
+  const confirm = "Hiermit wird die ordnungsgem\u00e4\u00dfe Durchf\u00fchrung der oben aufgef\u00fchrten Arbeiten best\u00e4tigt.";
+  doc.text(doc.splitTextToSize(confirm, cw), m + 5, y);
 
   // Footer on last page
   addFooter();
