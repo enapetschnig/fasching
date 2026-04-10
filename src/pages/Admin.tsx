@@ -2070,7 +2070,7 @@ function ZAOverviewSection({ profiles }: { profiles: { id: string; vorname: stri
 /* Vacation Overview Component - calculates vacation balance per employee */
 function VacationOverviewSection({ profiles }: { profiles: { id: string; vorname: string; nachname: string; is_active: boolean | null }[] }) {
   const { toast } = useToast();
-  const [vacData, setVacData] = useState<{ userId: string; name: string; entitled: number; taken: number }[]>([]);
+  const [vacData, setVacData] = useState<{ userId: string; name: string; entitled: number; taken: number; creditMonth: number | null; daysPerYear: number | null }[]>([]);
   const [loadingVac, setLoadingVac] = useState(true);
   const [filterMonth, setFilterMonth] = useState("");
 
@@ -2101,33 +2101,64 @@ function VacationOverviewSection({ profiles }: { profiles: { id: string; vorname
       adjQuery = adjQuery.gte("created_at", `${startDate}T00:00:00`).lte("created_at", `${endDate}T23:59:59`);
     }
 
-    const [{ data: allEntries }, { data: allAdjustments }] = await Promise.all([
+    const [{ data: allEntries }, { data: allAdjustments }, { data: employeeData }] = await Promise.all([
       entriesQuery,
       adjQuery,
+      supabase.from("employees").select("user_id, vacation_credit_month, vacation_days_per_year"),
     ]);
 
-    // Sum adjustments (entitled days) per user
     const adjMap: Record<string, number> = {};
     ((allAdjustments as any[]) || []).forEach((a: any) => {
       adjMap[a.user_id] = (adjMap[a.user_id] || 0) + Number(a.days);
     });
 
-    // Count unique vacation days per user
     const takenMap: Record<string, Set<string>> = {};
     (allEntries || []).forEach(e => {
       if (!takenMap[e.user_id]) takenMap[e.user_id] = new Set();
       takenMap[e.user_id].add(e.datum);
     });
 
+    const empMap: Record<string, { creditMonth: number | null; daysPerYear: number | null }> = {};
+    (employeeData || []).forEach((e: any) => {
+      if (e.user_id) empMap[e.user_id] = { creditMonth: e.vacation_credit_month, daysPerYear: e.vacation_days_per_year };
+    });
+
+    const monthNames = ["", "Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
     const result = activeProfiles.map(profile => ({
       userId: profile.id,
       name: `${profile.vorname} ${profile.nachname}`,
       entitled: adjMap[profile.id] || 0,
       taken: takenMap[profile.id]?.size || 0,
+      creditMonth: empMap[profile.id]?.creditMonth ?? null,
+      daysPerYear: empMap[profile.id]?.daysPerYear ?? null,
     }));
 
     setVacData(result);
     setLoadingVac(false);
+  };
+
+  const monthNames = ["", "Jänner", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+  const saveCreditSettings = async (userId: string, creditMonth: number | null, daysPerYear: number | null) => {
+    // Ensure employee record exists
+    const { data: existing } = await supabase.from("employees").select("id").eq("user_id", userId).maybeSingle();
+    if (!existing) {
+      const profile = profiles.find(p => p.id === userId);
+      await supabase.from("employees").insert({
+        user_id: userId,
+        vorname: profile?.vorname || "",
+        nachname: profile?.nachname || "",
+        vacation_credit_month: creditMonth,
+        vacation_days_per_year: daysPerYear,
+      });
+    } else {
+      await supabase.from("employees").update({
+        vacation_credit_month: creditMonth,
+        vacation_days_per_year: daysPerYear,
+      }).eq("user_id", userId);
+    }
+    toast({ title: "Gespeichert", description: "Urlaubseinstellungen aktualisiert" });
+    fetchVacData();
   };
 
   const openAdjustDialog = async (userId: string) => {
@@ -2242,8 +2273,9 @@ function VacationOverviewSection({ profiles }: { profiles: { id: string; vorname
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="text-left p-3 font-medium">Mitarbeiter</th>
-                    <th className="text-right p-3 font-medium">Guthaben (Tage)</th>
-                    <th className="text-right p-3 font-medium">Verbraucht (Tage)</th>
+                    <th className="text-left p-3 font-medium">Gutschrift</th>
+                    <th className="text-right p-3 font-medium">Guthaben</th>
+                    <th className="text-right p-3 font-medium">Verbraucht</th>
                     <th className="text-right p-3 font-medium">Saldo</th>
                     <th className="p-3 w-10"></th>
                   </tr>
@@ -2254,6 +2286,24 @@ function VacationOverviewSection({ profiles }: { profiles: { id: string; vorname
                     return (
                       <tr key={row.userId} className="border-b">
                         <td className="p-3 font-medium">{row.name}</td>
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            <Select
+                              value={row.creditMonth?.toString() || ""}
+                              onValueChange={(val) => saveCreditSettings(row.userId, val ? parseInt(val) : null, row.daysPerYear ?? 25)}
+                            >
+                              <SelectTrigger className="h-8 w-[120px] text-xs">
+                                <SelectValue placeholder="Monat..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {monthNames.slice(1).map((m, i) => (
+                                  <SelectItem key={i + 1} value={(i + 1).toString()}>{m}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <span className="text-xs text-muted-foreground">{row.daysPerYear ?? 25}T</span>
+                          </div>
+                        </td>
                         <td className="p-3 text-right text-muted-foreground">{row.entitled.toFixed(0)}</td>
                         <td className="p-3 text-right text-muted-foreground">{row.taken}</td>
                         <td className={`p-3 text-right font-bold ${saldo < 0 ? 'text-destructive' : 'text-primary'}`}>
