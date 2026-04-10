@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
+import { useBreakValidation } from "@/hooks/useBreakValidation";
 import { Download, FileSpreadsheet, Building2, ChevronDown, Pencil, Trash2 } from "lucide-react";
 import { format, isSameDay, parseISO } from "date-fns";
 import { de } from "date-fns/locale";
@@ -233,6 +234,13 @@ export default function HoursReport() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingEntry, setEditingEntry] = useState<EditableTimeEntry | null>(null);
+
+  // Break validation for admin edit dialog
+  const { breakfastTaken: editBreakfastTaken, lunchTaken: editLunchTaken } = useBreakValidation(
+    selectedUserId || null,
+    editingEntry?.datum || null,
+    editingEntry ? [editingEntry.id] : []
+  );
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [entryToDelete, setEntryToDelete] = useState<TimeEntry | null>(null);
@@ -1522,10 +1530,12 @@ export default function HoursReport() {
                         <Checkbox
                           id="edit-breakfast"
                           checked={editingEntry.has_breakfast_break}
+                          disabled={editBreakfastTaken && !editingEntry.has_breakfast_break}
                           onCheckedChange={(checked) => setEditingEntry((c) => c ? { ...c, has_breakfast_break: !!checked } : c)}
                         />
                         <Label htmlFor="edit-breakfast" className="flex-1 text-sm cursor-pointer">
                           Vormittagspause <span className="text-xs text-muted-foreground">(zählt als Arbeitszeit)</span>
+                          {editBreakfastTaken && !editingEntry.has_breakfast_break && <span className="text-xs text-muted-foreground ml-1">– bereits eingetragen</span>}
                         </Label>
                       </div>
                       {editingEntry.has_breakfast_break && (
@@ -1547,10 +1557,12 @@ export default function HoursReport() {
                         <Checkbox
                           id="edit-lunch"
                           checked={editingEntry.has_lunch_break}
+                          disabled={editLunchTaken && !editingEntry.has_lunch_break}
                           onCheckedChange={(checked) => setEditingEntry((c) => c ? { ...c, has_lunch_break: !!checked } : c)}
                         />
                         <Label htmlFor="edit-lunch" className="flex-1 text-sm cursor-pointer">
                           Mittagspause <span className="text-xs text-destructive">(wird abgezogen)</span>
+                          {editLunchTaken && !editingEntry.has_lunch_break && <span className="text-xs text-muted-foreground ml-1">– bereits eingetragen</span>}
                         </Label>
                       </div>
                       {editingEntry.has_lunch_break && (

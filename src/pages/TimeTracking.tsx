@@ -236,6 +236,85 @@ const TimeTracking = () => {
     toast({ title: "Normaltag ausgefüllt", description: `07:00–17:07:30 mit Pausen${projectInfo}` });
   };
 
+  // Reststunden auffüllen: Lücken im Tag erkennen
+  const fillGaps = () => {
+    if (existingDayEntries.length === 0) {
+      applyQuickDay();
+      return;
+    }
+
+    const dayStart = timeToMinutes(DEFAULT_START_TIME); // 07:00
+    const dayEnd = timeToMinutes(DEFAULT_END_TIME); // 17:07:30
+
+    // Bestehende Zeitblöcke sortieren
+    const occupied = existingDayEntries
+      .filter((e) => !ABSENCE_TYPES.includes(e.taetigkeit))
+      .map((e) => ({
+        start: timeToMinutes(e.start_time?.substring(0, 8) || "00:00"),
+        end: timeToMinutes(e.end_time?.substring(0, 8) || "00:00"),
+      }))
+      .sort((a, b) => a.start - b.start);
+
+    if (occupied.length === 0) {
+      applyQuickDay();
+      return;
+    }
+
+    // Lücken finden
+    const gaps: Array<{ start: number; end: number }> = [];
+    let cursor = dayStart;
+
+    for (const block of occupied) {
+      if (block.start > cursor + 1) {
+        gaps.push({ start: cursor, end: block.start });
+      }
+      cursor = Math.max(cursor, block.end);
+    }
+    if (cursor < dayEnd - 1) {
+      gaps.push({ start: cursor, end: dayEnd });
+    }
+
+    if (gaps.length === 0) {
+      toast({ title: "Keine Lücken", description: "Der Tag ist bereits vollständig ausgefüllt." });
+      return;
+    }
+
+    // Lücken als Zeitblöcke erstellen
+    const minutesToTimeStr = (mins: number): string => {
+      const h = Math.floor(mins);
+      const m = Math.round((mins - h) * 60);
+      const sec = mins === timeToMinutes(DEFAULT_END_TIME) ? ":30" : "";
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}${sec}`;
+    };
+
+    const newBlocks: TimeBlock[] = gaps.map((gap) => {
+      const startStr = minutesToTimeStr(gap.start);
+      const endStr = minutesToTimeStr(gap.end);
+      const spansBreakfast = gap.start <= timeToMinutes(BREAKFAST_BREAK_START) && gap.end >= timeToMinutes(BREAKFAST_BREAK_END);
+      const spansLunch = gap.start <= timeToMinutes(LUNCH_BREAK_START) && gap.end >= timeToMinutes(LUNCH_BREAK_END);
+
+      return {
+        id: crypto.randomUUID(),
+        locationType: "baustelle" as const,
+        projectId: todayAssignments.length === 1 ? todayAssignments[0].project_id : "",
+        taetigkeit: "",
+        startTime: startStr,
+        endTime: endStr,
+        hasBreakfastBreak: !breakfastTaken && spansBreakfast,
+        hasLunchBreak: !lunchTaken && spansLunch,
+        breakfastStart: BREAKFAST_BREAK_START,
+        breakfastEnd: BREAKFAST_BREAK_END,
+        lunchStart: LUNCH_BREAK_START,
+        lunchEnd: LUNCH_BREAK_END,
+        selectedEmployees: [],
+      };
+    });
+
+    setTimeBlocks(newBlocks);
+    const totalGapHours = gaps.reduce((sum, g) => sum + (g.end - g.start) / 60, 0);
+    toast({ title: "Reststunden", description: `${newBlocks.length} Lücke(n) gefunden – ${totalGapHours.toFixed(1)}h` });
+  };
+
   // Prüfe ob innerhalb der aktuellen Blöcke schon eine Pause ausgewählt ist
   const breakfastInBlocks = timeBlocks.some((b) => b.hasBreakfastBreak);
   const lunchInBlocks = timeBlocks.some((b) => b.hasLunchBreak);
@@ -851,11 +930,13 @@ const TimeTracking = () => {
                     <Button type="button" variant="default" size="sm" onClick={applyQuickDay} className="flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5" />Normaltag
                     </Button>
+                    {existingDayEntries.length > 0 && (
+                      <Button type="button" variant="default" size="sm" onClick={fillGaps} className="flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5" />Reststunden auffüllen
+                      </Button>
+                    )}
                     <Button type="button" variant="outline" size="sm" onClick={copyYesterday} className="flex items-center gap-1.5">
                       <Copy className="w-3.5 h-3.5" />Letzten Tag kopieren
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={applyFullDayPreset} className="flex items-center gap-1.5">
-                      <Sun className="w-3.5 h-3.5" />Regelarbeitszeit
                     </Button>
                   </div>
 
@@ -978,11 +1059,13 @@ const TimeTracking = () => {
                             <Label>Bis</Label>
                             <Input
                               type="time"
-                              step="1"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
                               className="text-center font-mono"
                             />
+                            {block.endTime && block.endTime.includes(":30") && block.endTime.length > 5 && (
+                              <p className="text-xs text-muted-foreground text-center">{block.endTime}</p>
+                            )}
                           </div>
                         </div>
 
