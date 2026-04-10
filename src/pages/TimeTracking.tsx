@@ -641,7 +641,7 @@ const TimeTracking = () => {
       const absenceHours = absenceEntries.reduce((sum, entry) => sum + Number(entry.stunden), 0);
       const dailyTarget = getTotalWorkingHours(new Date(selectedDate));
 
-      if (absenceHours >= dailyTarget) {
+      if (absenceEntries.length > 0 && absenceHours >= dailyTarget && dailyTarget > 0) {
         toast({ variant: "destructive", title: "Tag blockiert", description: `Für diesen Tag sind bereits ${absenceHours.toFixed(1)}h Abwesenheit eingetragen.` });
         setSaving(false);
         return;
@@ -649,8 +649,9 @@ const TimeTracking = () => {
 
       const existingHoursTotal = existingEntries.reduce((sum, entry) => sum + Number(entry.stunden), 0);
       const newHoursTotal = timeBlocks.reduce((sum, block) => sum + getBlockHours(block), 0);
-      if (existingHoursTotal + newHoursTotal > dailyTarget + 4) {
-        toast({ variant: "destructive", title: "Zu viele Stunden", description: `Tagessumme würde ${(existingHoursTotal + newHoursTotal).toFixed(1)}h betragen.` });
+      const maxHours = dailyTarget > 0 ? dailyTarget + 4 : 16;
+      if (existingHoursTotal + newHoursTotal > maxHours) {
+        toast({ variant: "destructive", title: "Zu viele Stunden", description: `Tagessumme würde ${(existingHoursTotal + newHoursTotal).toFixed(1)}h betragen (max. ${maxHours}h).` });
         setSaving(false);
         return;
       }
@@ -747,7 +748,7 @@ const TimeTracking = () => {
   const absenceEntries = existingDayEntries.filter((entry) => ABSENCE_TYPES.includes(entry.taetigkeit));
   const absenceHoursTotal = absenceEntries.reduce((sum, entry) => sum + Number(entry.stunden), 0);
   const dailyTargetForDate = getTotalWorkingHours(new Date(selectedDate));
-  const isDayBlocked = absenceHoursTotal >= dailyTargetForDate && dailyTargetForDate > 0;
+  const isDayBlocked = absenceEntries.length > 0 && absenceHoursTotal >= dailyTargetForDate && dailyTargetForDate > 0;
   const isPartialAbsence = absenceEntries.length > 0 && !isDayBlocked;
 
   if (loading) return <div className="p-4">Lädt...</div>;
