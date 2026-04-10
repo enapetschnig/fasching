@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Download, X, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
+import { Download, X, ZoomIn, ZoomOut, Loader2, Eye } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
@@ -183,11 +183,23 @@ export function FileViewer({
               />
             </div>
           ) : actualFileType === "pdf" ? (
-            <iframe
-              src={signedUrl}
-              className="w-full h-full rounded-lg border-0"
-              title={fileName}
-            />
+            <div className="w-full h-full flex flex-col">
+              <iframe
+                src={`${signedUrl}#toolbar=1&navpanes=0`}
+                className="w-full flex-1 rounded-lg border-0 bg-white"
+                title={fileName}
+              />
+              <div className="flex justify-center gap-2 pt-3">
+                <Button variant="outline" size="sm" onClick={() => window.open(signedUrl, "_blank")} className="gap-2">
+                  <Eye className="w-4 h-4" />
+                  In neuem Tab öffnen
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownload} disabled={loading} className="gap-2">
+                  <Download className="w-4 h-4" />
+                  Herunterladen
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-4">
               <p className="text-muted-foreground">
