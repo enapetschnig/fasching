@@ -701,6 +701,12 @@ const TimeTracking = () => {
         return;
       }
 
+      if (block.locationType === "baustelle" && !block.projectId) {
+        toast({ variant: "destructive", title: "Projekt fehlt", description: `Block ${blockNum}: Bitte ein Projekt auswählen (Pflicht bei Baustelle)` });
+        setSaving(false);
+        return;
+      }
+
       if (blockHours <= 0) {
         toast({ variant: "destructive", title: "Fehler", description: `Block ${blockNum}: Keine gültigen Arbeitsstunden` });
         setSaving(false);
@@ -982,7 +988,7 @@ const TimeTracking = () => {
                         {/* Projekt */}
                         {block.locationType === "baustelle" && (
                           <div className="space-y-2">
-                            <Label>Projekt <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                            <Label>Projekt *</Label>
                             <Popover
                               open={projectSearchOpen[block.id] || false}
                               onOpenChange={(open) => setProjectSearchOpen(prev => ({ ...prev, [block.id]: open }))}

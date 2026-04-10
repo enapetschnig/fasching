@@ -572,7 +572,7 @@ export default function Index() {
                     <div className="flex justify-between items-center gap-3">
                       <div className="flex-1 min-w-0">
                           <p className="font-semibold text-base truncate">
-                            {entry.location_type === "regie" ? `Arbeitsbericht: ${entry.disturbances?.kunde_name || "Arbeitsbericht"}` : (entry.projects?.name || (entry.disturbance_id ? "Arbeitsbericht" : "Unbekanntes Projekt"))}
+                            {entry.location_type === "regie" ? `Arbeitsbericht: ${entry.disturbances?.kunde_name || "Arbeitsbericht"}` : (entry.projects?.name || (entry.disturbance_id ? "Arbeitsbericht" : "Werkstatt"))}
                           </p>
                         <p className="text-sm text-muted-foreground truncate">{entry.taetigkeit}</p>
                       </div>
