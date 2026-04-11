@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Info, Coffee, UtensilsCrossed, Copy, Zap, Check, ChevronsUpDown } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Info, Coffee, UtensilsCrossed, Copy, Zap, Check, ChevronsUpDown, WifiOff } from "lucide-react";
 import { MultiEmployeeSelect } from "@/components/MultiEmployeeSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { format } from "date-fns";
@@ -18,6 +18,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 
 import { useToast } from "@/hooks/use-toast";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useBreakValidation } from "@/hooks/useBreakValidation";
 import { supabase } from "@/integrations/supabase/client";
 import { toast as sonnerToast } from "sonner";
@@ -96,6 +97,8 @@ const ABSENCE_TYPES = ["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch", 
 
 const TimeTracking = () => {
   const { toast } = useToast();
+  const { isOnline } = useNetworkStatus();
+  const submitLock = useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -674,11 +677,14 @@ const TimeTracking = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSaving(true);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       toast({ variant: "destructive", title: "Fehler", description: "Sie müssen angemeldet sein" });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
@@ -691,24 +697,28 @@ const TimeTracking = () => {
 
       if (!block.startTime || !block.endTime) {
         toast({ variant: "destructive", title: "Fehler", description: `Block ${blockNum}: Bitte Von- und Bis-Zeit eingeben` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
 
       if (timeToMinutes(block.endTime) <= timeToMinutes(block.startTime)) {
         toast({ variant: "destructive", title: "Fehler", description: `Block ${blockNum}: Bis-Zeit muss nach Von-Zeit liegen` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
 
       if (block.locationType === "baustelle" && !block.projectId) {
         toast({ variant: "destructive", title: "Projekt fehlt", description: `Block ${blockNum}: Bitte ein Projekt auswählen (Pflicht bei Baustelle)` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
 
       if (blockHours <= 0) {
         toast({ variant: "destructive", title: "Fehler", description: `Block ${blockNum}: Keine gültigen Arbeitsstunden` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -728,6 +738,7 @@ const TimeTracking = () => {
 
       if (absenceEntries.length > 0 && absenceHours >= dailyTarget && dailyTarget > 0) {
         toast({ variant: "destructive", title: "Tag blockiert", description: `Für diesen Tag sind bereits ${absenceHours.toFixed(1)}h Abwesenheit eingetragen.` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -737,6 +748,7 @@ const TimeTracking = () => {
       const maxHours = dailyTarget > 0 ? dailyTarget + 4 : 16;
       if (existingHoursTotal + newHoursTotal > maxHours) {
         toast({ variant: "destructive", title: "Zu viele Stunden", description: `Tagessumme würde ${(existingHoursTotal + newHoursTotal).toFixed(1)}h betragen (max. ${maxHours}h).` });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -750,6 +762,7 @@ const TimeTracking = () => {
           const bEnd = timeToMinutes(timeBlocks[j].endTime);
           if (aStart < bEnd && aEnd > bStart) {
             toast({ variant: "destructive", title: "Zeitüberschneidung", description: `Block ${i + 1} und Block ${j + 1} überschneiden sich.` });
+            submitLock.current = false;
             setSaving(false);
             return;
           }
@@ -768,6 +781,7 @@ const TimeTracking = () => {
           const blockEnd = timeToMinutes(block.endTime);
           if (blockStart < existingEnd && blockEnd > existingStart) {
             toast({ variant: "destructive", title: "Zeitüberschneidung", description: `Block ${i + 1} überschneidet mit bestehendem Eintrag.` });
+            submitLock.current = false;
             setSaving(false);
             return;
           }
@@ -827,6 +841,7 @@ const TimeTracking = () => {
       toast({ variant: "destructive", title: "Fehler", description: "Einige Einträge konnten nicht gespeichert werden" });
     }
 
+    submitLock.current = false;
     setSaving(false);
   };
 
@@ -840,6 +855,12 @@ const TimeTracking = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      {!isOnline && (
+        <div className="bg-destructive text-destructive-foreground px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2">
+          <WifiOff className="w-4 h-4" />
+          Keine Internetverbindung – Daten werden nicht übertragen
+        </div>
+      )}
       <PageHeader title="Zeiterfassung" backPath="/" />
       <div className="p-4">
         <Card className="max-w-2xl mx-auto">
@@ -957,7 +978,7 @@ const TimeTracking = () => {
                             {timeBlocks.length > 1 ? `Zeitblock ${index + 1}` : "Arbeitszeit"}
                           </h3>
                           {timeBlocks.length > 1 && (
-                            <Button type="button" variant="ghost" size="sm" onClick={() => removeBlock(block.id)} className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                            <Button type="button" variant="ghost" size="sm" onClick={() => removeBlock(block.id)} className="min-h-[44px] min-w-[44px] text-destructive hover:text-destructive hover:bg-destructive/10">
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           )}

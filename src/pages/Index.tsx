@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Clock, FolderKanban, Users, BarChart3, LogOut, FileText, Camera, ArrowRight, Info, User as UserIcon, Zap, CalendarDays, MapPin, StickyNote } from "lucide-react";
+import { Clock, FolderKanban, Users, BarChart3, LogOut, FileText, Camera, ArrowRight, Info, User as UserIcon, Zap, CalendarDays, MapPin, StickyNote, WifiOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useOnboarding } from "@/contexts/OnboardingContext";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 
 // Types
 type Project = {
@@ -51,6 +52,7 @@ export default function Index() {
   const [loading, setLoading] = useState(true);
   const [isActivated, setIsActivated] = useState<boolean | null>(null);
   const { handleRestartInstallGuide } = useOnboarding();
+  const { isOnline } = useNetworkStatus();
 
   const fetchProjects = async () => {
     const { data } = await supabase
@@ -69,12 +71,13 @@ export default function Index() {
     let query = supabase
       .from("time_entries")
       .select("id, datum, stunden, taetigkeit, disturbance_id, project_id, location_type, projects(name), disturbances(kunde_name)")
-      .order("datum", { ascending: false })
-      .limit(5);
+      .order("datum", { ascending: false });
 
     if (role === "mitarbeiter") {
       query = query.eq("user_id", userId);
     }
+
+    query = query.limit(10);
 
     const { data } = await query;
 
@@ -253,6 +256,12 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background">
+      {!isOnline && (
+        <div className="bg-destructive text-destructive-foreground px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2">
+          <WifiOff className="w-4 h-4" />
+          Keine Internetverbindung – Daten werden nicht übertragen
+        </div>
+      )}
       {/* Header */}
       <header className="border-b bg-card sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">

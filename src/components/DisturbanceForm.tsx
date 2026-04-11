@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Calendar, Clock, User, Mail, Phone, MapPin, FileText, Package, Plus, Trash2, FolderOpen, Check, ChevronsUpDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -49,6 +49,7 @@ type DisturbanceFormProps = {
 export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: DisturbanceFormProps) => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const submitLock = useRef(false);
   const [saving, setSaving] = useState(false);
   const [workType, setWorkType] = useState<"projekt" | "kunde">("kunde");
   const [hasBreakfastBreak, setHasBreakfastBreak] = useState(false);
@@ -215,11 +216,14 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     setSaving(true);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       toast({ variant: "destructive", title: "Fehler", description: "Sie müssen angemeldet sein" });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
@@ -227,12 +231,14 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     // Validation
     if (!formData.kundeName.trim()) {
       toast({ variant: "destructive", title: "Fehler", description: "Kundenname ist erforderlich" });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
 
     if (!formData.beschreibung.trim()) {
       toast({ variant: "destructive", title: "Fehler", description: "Arbeitsbeschreibung ist erforderlich" });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
@@ -241,6 +247,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     const [endH, endM] = formData.endTime.split(":").map(Number);
     if (endH * 60 + endM <= startH * 60 + startM) {
       toast({ variant: "destructive", title: "Fehler", description: "Endzeit muss nach Startzeit liegen" });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
@@ -248,6 +255,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
     const stunden = calculateHours();
     if (stunden <= 0 || stunden > 16) {
       toast({ variant: "destructive", title: "Fehler", description: `Ungültige Stundenzahl: ${stunden.toFixed(2)}h. Maximum ist 16h.` });
+      submitLock.current = false;
       setSaving(false);
       return;
     }
@@ -278,6 +286,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
 
       if (error) {
         toast({ variant: "destructive", title: "Fehler", description: "Arbeitsbericht konnte nicht aktualisiert werden" });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -298,6 +307,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
 
       if (error) {
         toast({ variant: "destructive", title: "Fehler", description: "Arbeitsbericht konnte nicht erstellt werden" });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -315,6 +325,7 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
 
       if (workersError) {
         toast({ variant: "destructive", title: "Fehler", description: "Mitarbeiter konnten nicht gespeichert werden" });
+        submitLock.current = false;
         setSaving(false);
         return;
       }
@@ -336,12 +347,14 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
 
       toast({ title: "Erfolg", description: "Arbeitsbericht wurde erfasst" });
 
+      submitLock.current = false;
       setSaving(false);
       onOpenChange(false);
       navigate(`/disturbances/${newDisturbance.id}?openSignature=true`);
       return;
     }
 
+    submitLock.current = false;
     setSaving(false);
     onSuccess();
   };

@@ -172,18 +172,23 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    checkAdminAccess();
-    fetchUsers();
-    fetchEmployees();
-    fetchSickNotes();
-    fetchAppSettings();
+    const init = async () => {
+      const isAdmin = await checkAdminAccess();
+      if (isAdmin) {
+        fetchUsers();
+        fetchEmployees();
+        fetchSickNotes();
+        fetchAppSettings();
+      }
+    };
+    init();
   }, [fetchAppSettings]);
 
-  const checkAdminAccess = async () => {
+  const checkAdminAccess = async (): Promise<boolean> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       navigate("/auth");
-      return;
+      return false;
     }
 
     const { data: roleData } = await supabase
@@ -194,7 +199,9 @@ export default function Admin() {
 
     if (!roleData || roleData.role !== "administrator") {
       navigate("/");
+      return false;
     }
+    return true;
   };
 
   const fetchUsers = async (options?: { silent?: boolean }) => {
