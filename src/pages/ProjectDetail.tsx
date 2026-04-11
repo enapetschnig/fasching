@@ -64,33 +64,34 @@ const ProjectDetail = () => {
   }, [files]);
 
   const generateSignedUrls = async () => {
-    if (!projectId || !type) return;
-    
+    if (!projectId || !type || files.length === 0) return;
+
     const bucket = bucketMap[type];
     const isPublic = bucket === "project-photos";
-    
+
     setUrlsLoading(true);
     const urls: Record<string, string> = {};
-    
-    for (const file of files) {
-      const filePath = `${projectId}/${file.name}`;
-      
-      if (isPublic) {
-        const { data } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(filePath);
+
+    if (isPublic) {
+      // Fotos: public URLs sofort generieren (kein API-Call)
+      files.forEach((file) => {
+        const { data } = supabase.storage.from(bucket).getPublicUrl(`${projectId}/${file.name}`);
         urls[file.name] = data.publicUrl;
-      } else {
-        const { data, error } = await supabase.storage
-          .from(bucket)
-          .createSignedUrl(filePath, 3600);
-        
-        if (!error && data) {
-          urls[file.name] = data.signedUrl;
-        }
+      });
+    } else {
+      // Private Buckets: Batch-Request für alle Dateien auf einmal
+      const paths = files.map((f) => `${projectId}/${f.name}`);
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .createSignedUrls(paths, 3600);
+
+      if (!error && data) {
+        data.forEach((item, i) => {
+          if (item.signedUrl) urls[files[i].name] = item.signedUrl;
+        });
       }
     }
-    
+
     setSignedUrls(urls);
     setUrlsLoading(false);
   };
@@ -278,17 +279,17 @@ const ProjectDetail = () => {
                     key={file.id}
                     className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
                   >
-                    {urlsLoading ? (
-                      <div className="w-12 h-12 sm:w-16 sm:h-16 bg-muted animate-pulse rounded shrink-0" />
-                    ) : signedUrls[file.name] && (file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i) || file.name.match(/\.pdf$/i)) ? (
-                      <img 
-                        src={signedUrls[file.name]} 
+                    {file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i) && signedUrls[file.name] ? (
+                      <img
+                        src={signedUrls[file.name]}
                         alt={file.name}
                         className="w-12 h-12 sm:w-16 sm:h-16 object-cover rounded shrink-0"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                       />
+                    ) : file.name.match(/\.pdf$/i) ? (
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-50 dark:bg-red-900/20 rounded shrink-0 flex items-center justify-center">
+                        <span className="text-red-600 font-bold text-xs">PDF</span>
+                      </div>
                     ) : (
                       <FileText className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground shrink-0" />
                     )}
