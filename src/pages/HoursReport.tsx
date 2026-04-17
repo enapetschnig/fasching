@@ -283,25 +283,31 @@ export default function HoursReport() {
       let zaUsed = 0;
       const vacationDates = new Set<string>();
 
-      const dayHours: Record<string, number> = {};
+      // Gruppiere nach Tag: Alle Stunden (Arbeit + Abwesenheit) zählen zum Tagessoll
+      const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
       (monthEntries || []).forEach((e) => {
         if (e.taetigkeit === "Zeitausgleich") {
           zaUsed += Number(e.stunden);
-        } else if (e.taetigkeit === "Urlaub") {
-          vacationDates.add(e.datum);
-        } else if (!["Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
-          dayHours[e.datum] = (dayHours[e.datum] || 0) + Number(e.stunden);
+          return; // ZA wird separat als "genommen" gezählt
+        }
+        if (!byDay[e.datum]) byDay[e.datum] = { total: 0, hasAbsence: false };
+        byDay[e.datum].total += Number(e.stunden);
+        if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
+          byDay[e.datum].hasAbsence = true;
+          if (e.taetigkeit === "Urlaub") vacationDates.add(e.datum);
         }
       });
 
-      // Über-/Minusstunden pro Tag
-      Object.entries(dayHours).forEach(([datum, hours]) => {
-        const date = new Date(datum);
+      // Über-/Minusstunden pro Tag (Zeitzone-sicher mit T00:00:00)
+      Object.entries(byDay).forEach(([datum, { total, hasAbsence }]) => {
+        const date = new Date(datum + "T00:00:00");
         const target = getNormalWorkingHours(date);
-        if (target === 0 && hours > 0) {
-          zaEarned += hours;
+        // Nur-Abwesenheit-Tage: Soll ist erfüllt, keine Differenz
+        if (hasAbsence && total <= target + 0.01) return;
+        if (target === 0 && total > 0) {
+          zaEarned += total; // FR/SA/SO Arbeit = alles Überstunde
         } else if (target > 0) {
-          zaEarned += hours - target;
+          zaEarned += total - target; // kann negativ sein
         }
       });
 
@@ -756,13 +762,24 @@ export default function HoursReport() {
       noOvertime: finalizeBreakdown(noOvertimeBreakdown),
       totalHours: timeEntries.reduce((sum, entry) => sum + Number(entry.stunden || 0), 0),
       totalOvertime: (() => {
-        // Overtime auf Tagesbasis berechnen, nicht pro Eintrag
-        const dayTotals: Record<string, number> = {};
+        // Konsistent mit fetchEmployeeBalances: nach Tag gruppieren,
+        // Abwesenheiten erfüllen Tagessoll, ZA separat behandelt
+        const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
         timeEntries.forEach((e) => {
-          dayTotals[e.datum] = (dayTotals[e.datum] || 0) + Number(e.stunden || 0);
+          if (e.taetigkeit === "Zeitausgleich") return;
+          if (!byDay[e.datum]) byDay[e.datum] = { total: 0, hasAbsence: false };
+          byDay[e.datum].total += Number(e.stunden || 0);
+          if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
+            byDay[e.datum].hasAbsence = true;
+          }
         });
-        return Object.entries(dayTotals).reduce((sum, [datum, hours]) => {
-          return sum + calculateOvertime(parseISO(datum), hours);
+        return Object.entries(byDay).reduce((sum, [datum, { total, hasAbsence }]) => {
+          const date = new Date(datum + "T00:00:00");
+          const target = getNormalWorkingHours(date);
+          if (hasAbsence && total <= target + 0.01) return sum;
+          if (target === 0 && total > 0) return sum + total;
+          if (target > 0) return sum + (total - target);
+          return sum;
         }, 0);
       })(),
     };
@@ -1306,6 +1323,18 @@ export default function HoursReport() {
                             monthDays.map((day) => {
                               const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), day.date));
                               const dayTotalHours = dayEntries.reduce((sum, e) => sum + Number(e.stunden || 0), 0);
+                              // Über-/Minusstunden: ZA ignorieren, Abwesenheit erfüllt Soll
+                              const dayNonZAEntries = dayEntries.filter((e) => e.taetigkeit !== "Zeitausgleich");
+                              const dayNonZATotal = dayNonZAEntries.reduce((sum, e) => sum + Number(e.stunden || 0), 0);
+                              const dayHasAbsence = dayNonZAEntries.some((e) =>
+                                ["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")
+                              );
+                              const dayTarget = getNormalWorkingHours(day.date);
+                              const dayDiff = (dayHasAbsence && dayNonZATotal <= dayTarget + 0.01)
+                                ? 0
+                                : dayTarget === 0
+                                ? dayNonZATotal
+                                : dayNonZATotal - dayTarget;
                               const hasMultipleEntries = dayEntries.length > 1;
 
                               if (dayEntries.length === 0) {
@@ -1329,7 +1358,7 @@ export default function HoursReport() {
 
                               return dayEntries.map((entry, entryIndex) => {
                                 const lunchBreak = calculateLunchBreak(entry);
-                                const dayOvertime = calculateOvertime(day.date, dayTotalHours);
+                                const dayOvertime = dayDiff;
                                 const project = entry.project_id ? projects[entry.project_id] : undefined;
                                 const isRegie = entry.location_type === "regie" || entry.disturbance_id != null;
                                 const ortIcon = isRegie ? "🧾" : entry.location_type === "baustelle" ? "🏗️" : entry.location_type === "werkstatt" ? "🔧" : "";
