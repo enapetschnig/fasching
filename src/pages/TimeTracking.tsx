@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Info, Coffee, UtensilsCrossed, Copy, Zap, Check, ChevronsUpDown, WifiOff } from "lucide-react";
+import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Info, Coffee, UtensilsCrossed, Copy, Zap, Check, ChevronsUpDown } from "lucide-react";
 import { MultiEmployeeSelect } from "@/components/MultiEmployeeSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { format } from "date-fns";
@@ -18,7 +18,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { cn } from "@/lib/utils";
 
 import { useToast } from "@/hooks/use-toast";
-import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useBreakValidation } from "@/hooks/useBreakValidation";
 import { supabase } from "@/integrations/supabase/client";
 import { toast as sonnerToast } from "sonner";
@@ -97,7 +96,6 @@ const ABSENCE_TYPES = ["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch", 
 
 const TimeTracking = () => {
   const { toast } = useToast();
-  const isOnline = useNetworkStatus();
   const submitLock = useRef(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -855,12 +853,6 @@ const TimeTracking = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {!isOnline && (
-        <div className="bg-destructive text-destructive-foreground px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2">
-          <WifiOff className="w-4 h-4" />
-          Keine Internetverbindung – Daten werden nicht übertragen
-        </div>
-      )}
       <PageHeader title="Zeiterfassung" backPath="/" />
       <div className="p-4">
         <Card className="max-w-2xl mx-auto">
