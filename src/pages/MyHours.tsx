@@ -759,10 +759,25 @@ const MyHours = () => {
                     <Input
                       id="edit-end-time"
                       type="time"
-                      step="1"
+                      step="900"
                       value={editingEntry.end_time || ''}
                       onChange={(e) => setEditingEntry({...editingEntry, end_time: e.target.value})}
+                      className="w-full"
                     />
+                    {editingEntry.end_time !== "17:07:30" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-full text-xs font-normal text-muted-foreground hover:text-foreground mt-1"
+                        onClick={() => setEditingEntry({...editingEntry, end_time: "17:07:30"})}
+                      >
+                        → Regelende 17:07:30
+                      </Button>
+                    )}
+                    {editingEntry.end_time === "17:07:30" && (
+                      <p className="text-xs text-center text-primary font-medium mt-1">17:07:30 (exakt)</p>
+                    )}
                   </div>
                 </div>
               </div>

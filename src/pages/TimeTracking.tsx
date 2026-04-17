@@ -1183,11 +1183,25 @@ const TimeTracking = () => {
                             <Label>Bis</Label>
                             <Input
                               type="time"
-                              step="1"
+                              step="900"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
-                              className="text-center font-mono"
+                              className="text-center font-mono w-full"
                             />
+                            {block.endTime !== "17:07:30" && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-full text-xs font-normal text-muted-foreground hover:text-foreground"
+                                onClick={() => updateBlock(block.id, { endTime: "17:07:30" })}
+                              >
+                                → Regelende 17:07:30
+                              </Button>
+                            )}
+                            {block.endTime === "17:07:30" && (
+                              <p className="text-xs text-center text-primary font-medium">17:07:30 (exakt)</p>
+                            )}
                           </div>
                         </div>
 
