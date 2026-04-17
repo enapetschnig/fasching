@@ -280,12 +280,13 @@ const TimeTracking = () => {
       return;
     }
 
-    // Minuten seit Mitternacht → HH:MM String (kein Sekunden, damit time-input es akzeptiert)
+    // Minuten seit Mitternacht → HH:MM:SS String (mit Sekunden für 17:07:30)
     const minsToStr = (totalMins: number): string => {
-      const rounded = Math.round(totalMins);
-      const h = Math.floor(rounded / 60);
-      const m = rounded % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const totalSecs = Math.round(totalMins * 60);
+      const h = Math.floor(totalSecs / 3600);
+      const m = Math.floor((totalSecs % 3600) / 60);
+      const s = totalSecs % 60;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
     };
 
     const newBlocks: TimeBlock[] = gaps.map((gap) => {
@@ -1069,6 +1070,7 @@ const TimeTracking = () => {
                             <Label>Von</Label>
                             <Input
                               type="time"
+                              step="1"
                               value={block.startTime}
                               onChange={(e) => updateBlock(block.id, { startTime: e.target.value })}
                               className="text-center font-mono"
@@ -1078,13 +1080,11 @@ const TimeTracking = () => {
                             <Label>Bis</Label>
                             <Input
                               type="time"
+                              step="1"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
                               className="text-center font-mono"
                             />
-                            {block.endTime && block.endTime.includes(":30") && block.endTime.length > 5 && (
-                              <p className="text-xs text-muted-foreground text-center">{block.endTime}</p>
-                            )}
                           </div>
                         </div>
 
