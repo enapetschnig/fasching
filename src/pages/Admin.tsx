@@ -324,9 +324,16 @@ export default function Admin() {
 
     if (error) {
       toast({ title: "Fehler", description: error.message, variant: "destructive" });
-    } else {
-      setEmployees(data || []);
+      return;
     }
+
+    // Profile-IDs mit is_hidden=true ausblenden
+    const { data: hiddenProfiles } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("is_hidden" as any, true);
+    const hiddenIds = new Set((hiddenProfiles || []).map((p: any) => p.id));
+    setEmployees((data || []).filter((emp: any) => !emp.user_id || !hiddenIds.has(emp.user_id)));
   };
 
   const fetchSickNotes = async () => {
