@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { Clock, Plus, AlertTriangle, CheckCircle2, Calendar, Sun, Trash2, Coffee, UtensilsCrossed, Copy, Zap, Check, ChevronsUpDown } from "lucide-react";
-import { MultiEmployeeSelect } from "@/components/MultiEmployeeSelect";
 import { PageHeader } from "@/components/PageHeader";
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
@@ -483,12 +482,6 @@ const TimeTracking = () => {
     }));
   };
 
-  const updateBlockEmployees = (blockId: string, employees: string[]) => {
-    setTimeBlocks((prev) => prev.map((block) => (
-      block.id === blockId ? { ...block, selectedEmployees: employees } : block
-    )));
-  };
-
   const addTimeBlock = () => {
     const lastBlock = timeBlocks[timeBlocks.length - 1];
     const nextStart = lastBlock?.endTime || getLastExistingEndTime() || DEFAULT_START_TIME;
@@ -932,10 +925,9 @@ const TimeTracking = () => {
       };
 
       const mainEntry = { ...entryData, user_id: user.id };
-      const teamEntries = block.selectedEmployees.map((workerId) => ({ ...entryData, user_id: workerId }));
 
       const { data: result, error: functionError } = await supabase.functions.invoke("create-team-time-entries", {
-        body: { mainEntry, teamEntries, disturbanceIds: [], createWorkerLinks: true },
+        body: { mainEntry, teamEntries: [], disturbanceIds: [], createWorkerLinks: true },
       });
 
       if (functionError || !result?.success) {
@@ -948,8 +940,7 @@ const TimeTracking = () => {
     }
 
     if (!hasError) {
-      const teamInfo = timeBlocks.some((block) => block.selectedEmployees.length > 0) ? " (inkl. Team-Mitglieder)" : "";
-      toast({ title: "Erfolg", description: `${totalEntriesCreated} Eintrag/Einträge gespeichert${teamInfo}` });
+      toast({ title: "Erfolg", description: `${totalEntriesCreated} Eintrag/Einträge gespeichert` });
       await fetchExistingDayEntries(selectedDate);
     } else {
       toast({ variant: "destructive", title: "Fehler", description: "Einige Einträge konnten nicht gespeichert werden" });
@@ -1191,12 +1182,11 @@ const TimeTracking = () => {
                             {block.endTime !== "17:07:30" && (
                               <Button
                                 type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-full text-xs font-normal text-muted-foreground hover:text-foreground"
+                                variant="outline"
+                                className="h-10 w-full text-sm font-medium border-2 border-primary/60 text-primary hover:bg-primary/10 hover:border-primary"
                                 onClick={() => updateBlock(block.id, { endTime: "17:07:30" })}
                               >
-                                → Regelende 17:07:30
+                                Auf 17:07:30 setzen
                               </Button>
                             )}
                             {block.endTime === "17:07:30" && (
@@ -1206,27 +1196,34 @@ const TimeTracking = () => {
                         </div>
 
                         {/* Pausen */}
-                        <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                        <div className="space-y-2">
                           {/* Vormittagspause */}
                           <div className="space-y-2">
-                            <label htmlFor={`breakfast-${block.id}`} className="flex items-start gap-3 min-h-11 cursor-pointer">
+                            <label
+                              htmlFor={`breakfast-${block.id}`}
+                              className={cn(
+                                "flex items-center gap-4 min-h-14 cursor-pointer rounded-lg border-2 p-3 transition-colors",
+                                block.hasBreakfastBreak
+                                  ? "border-amber-500 bg-amber-50 dark:bg-amber-900/20"
+                                  : "border-muted bg-muted/30 hover:border-muted-foreground/40",
+                                (breakfastTaken || (breakfastInBlocks && !block.hasBreakfastBreak)) && "opacity-60 cursor-not-allowed"
+                              )}
+                            >
                               <Checkbox
                                 id={`breakfast-${block.id}`}
                                 checked={block.hasBreakfastBreak}
                                 disabled={breakfastTaken || (breakfastInBlocks && !block.hasBreakfastBreak)}
                                 onCheckedChange={(checked) => updateBlock(block.id, { hasBreakfastBreak: !!checked })}
-                                className="mt-1"
+                                className="h-6 w-6 shrink-0"
                               />
+                              <Coffee className="w-5 h-5 text-amber-600 shrink-0" />
                               <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <Coffee className="w-4 h-4 text-amber-600 shrink-0" />
-                                  <span className="text-sm font-medium">Vormittagspause (09:00–09:15)</span>
-                                </div>
-                                <p className="text-xs text-muted-foreground mt-0.5">Wird zur Arbeitszeit gezählt</p>
+                                <div className="text-base font-semibold">Vormittagspause</div>
+                                <p className="text-xs text-muted-foreground mt-0.5">09:00–09:15 · zählt als Arbeitszeit</p>
                               </div>
                             </label>
                             {block.hasBreakfastBreak && (
-                              <div className="grid grid-cols-2 gap-2 pl-8">
+                              <div className="grid grid-cols-2 gap-2 pl-2">
                                 <div>
                                   <label className="text-xs text-muted-foreground">Von</label>
                                   <Input type="time" step="900" value={block.breakfastStart} onChange={(e) => updateBlock(block.id, { breakfastStart: e.target.value })} className="h-10 text-sm font-mono" />
@@ -1238,30 +1235,37 @@ const TimeTracking = () => {
                               </div>
                             )}
                             {(breakfastTaken || (breakfastInBlocks && !block.hasBreakfastBreak)) && (
-                              <p className="text-xs text-muted-foreground pl-8">Bereits eingetragen</p>
+                              <p className="text-xs text-muted-foreground pl-2">Bereits eingetragen</p>
                             )}
                           </div>
 
                           {/* Mittagspause */}
                           <div className="space-y-2">
-                            <label htmlFor={`lunch-${block.id}`} className="flex items-start gap-3 min-h-11 cursor-pointer">
+                            <label
+                              htmlFor={`lunch-${block.id}`}
+                              className={cn(
+                                "flex items-center gap-4 min-h-14 cursor-pointer rounded-lg border-2 p-3 transition-colors",
+                                block.hasLunchBreak
+                                  ? "border-orange-500 bg-orange-50 dark:bg-orange-900/20"
+                                  : "border-muted bg-muted/30 hover:border-muted-foreground/40",
+                                (lunchTaken || (lunchInBlocks && !block.hasLunchBreak)) && "opacity-60 cursor-not-allowed"
+                              )}
+                            >
                               <Checkbox
                                 id={`lunch-${block.id}`}
                                 checked={block.hasLunchBreak}
                                 disabled={lunchTaken || (lunchInBlocks && !block.hasLunchBreak)}
                                 onCheckedChange={(checked) => updateBlock(block.id, { hasLunchBreak: !!checked })}
-                                className="mt-1"
+                                className="h-6 w-6 shrink-0"
                               />
+                              <UtensilsCrossed className="w-5 h-5 text-orange-600 shrink-0" />
                               <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <UtensilsCrossed className="w-4 h-4 text-orange-600 shrink-0" />
-                                  <span className="text-sm font-medium">Mittagspause (12:00–12:30)</span>
-                                </div>
-                                <p className="text-xs text-muted-foreground mt-0.5">Wird von der Arbeitszeit abgezogen</p>
+                                <div className="text-base font-semibold">Mittagspause</div>
+                                <p className="text-xs text-muted-foreground mt-0.5">12:00–12:30 · wird abgezogen</p>
                               </div>
                             </label>
                             {block.hasLunchBreak && (
-                              <div className="grid grid-cols-2 gap-2 pl-8">
+                              <div className="grid grid-cols-2 gap-2 pl-2">
                                 <div>
                                   <label className="text-xs text-muted-foreground">Von</label>
                                   <Input type="time" step="900" value={block.lunchStart} onChange={(e) => updateBlock(block.id, { lunchStart: e.target.value })} className="h-10 text-sm font-mono" />
@@ -1273,14 +1277,9 @@ const TimeTracking = () => {
                               </div>
                             )}
                             {(lunchTaken || (lunchInBlocks && !block.hasLunchBreak)) && (
-                              <p className="text-xs text-muted-foreground pl-8">Bereits eingetragen</p>
+                              <p className="text-xs text-muted-foreground pl-2">Bereits eingetragen</p>
                             )}
                           </div>
-                        </div>
-
-                        {/* Team-Mitglieder */}
-                        <div className="border-t pt-3">
-                          <MultiEmployeeSelect selectedEmployees={block.selectedEmployees} onSelectionChange={(employees) => updateBlockEmployees(block.id, employees)} date={selectedDate} startTime={block.startTime} endTime={block.endTime} label="Weitere Mitarbeiter (optional)" />
                         </div>
 
                         {/* Berechnete Stunden */}

@@ -1651,11 +1651,11 @@ export default function HoursReport() {
                         <div className="grid grid-cols-2 gap-2 pl-8">
                           <div>
                             <label className="text-xs text-muted-foreground">Von</label>
-                            <Input type="time" value={editingEntry.breakfast_start} onChange={(e) => setEditingEntry((c) => c ? { ...c, breakfast_start: e.target.value } : c)} className="h-9 text-sm font-mono" />
+                            <Input type="time" step="900" value={editingEntry.breakfast_start} onChange={(e) => setEditingEntry((c) => c ? { ...c, breakfast_start: e.target.value } : c)} className="h-9 text-sm font-mono" />
                           </div>
                           <div>
                             <label className="text-xs text-muted-foreground">Bis</label>
-                            <Input type="time" value={editingEntry.breakfast_end} onChange={(e) => setEditingEntry((c) => c ? { ...c, breakfast_end: e.target.value } : c)} className="h-9 text-sm font-mono" />
+                            <Input type="time" step="900" value={editingEntry.breakfast_end} onChange={(e) => setEditingEntry((c) => c ? { ...c, breakfast_end: e.target.value } : c)} className="h-9 text-sm font-mono" />
                           </div>
                         </div>
                       )}
@@ -1678,11 +1678,11 @@ export default function HoursReport() {
                         <div className="grid grid-cols-2 gap-2 pl-8">
                           <div>
                             <label className="text-xs text-muted-foreground">Von</label>
-                            <Input type="time" value={editingEntry.lunch_start} onChange={(e) => setEditingEntry((c) => c ? { ...c, lunch_start: e.target.value } : c)} className="h-9 text-sm font-mono" />
+                            <Input type="time" step="900" value={editingEntry.lunch_start} onChange={(e) => setEditingEntry((c) => c ? { ...c, lunch_start: e.target.value } : c)} className="h-9 text-sm font-mono" />
                           </div>
                           <div>
                             <label className="text-xs text-muted-foreground">Bis</label>
-                            <Input type="time" value={editingEntry.lunch_end} onChange={(e) => setEditingEntry((c) => c ? { ...c, lunch_end: e.target.value } : c)} className="h-9 text-sm font-mono" />
+                            <Input type="time" step="900" value={editingEntry.lunch_end} onChange={(e) => setEditingEntry((c) => c ? { ...c, lunch_end: e.target.value } : c)} className="h-9 text-sm font-mono" />
                           </div>
                         </div>
                       )}
