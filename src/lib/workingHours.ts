@@ -32,14 +32,14 @@ export const LUNCH_BREAK_START_MINUTES = 12 * 60;
 export const LUNCH_BREAK_END_MINUTES = 12 * 60 + 30;
 export const LUNCH_BREAK_MINUTES = 30;
 
-// Regelarbeitszeit: MO-DO 9.625h netto (Soll für ZA-Berechnung)
-// Zeit-Input: 07:00-17:08 (15-Min-aligned für Handy, minimale Rundung)
+// Regelarbeitszeit: MO-DO 07:00-17:07:30 exakt (9.625h netto, 0.5h Mittagspause)
+// Bis-Feld nutzt step="1" für Sekunden-Eingabe (notwendig für 17:07:30)
 export const DAILY_WORK_MINUTES = 577.5;
 export const DAILY_WORK_HOURS = 9.625;
 export const WEEKLY_TARGET_HOURS = 38.5;
 export const DEFAULT_START_TIME = "07:00";
-export const DEFAULT_END_TIME = "17:08";
-export const DEFAULT_END_TIME_DISPLAY = "17:08";
+export const DEFAULT_END_TIME = "17:07:30";
+export const DEFAULT_END_TIME_DISPLAY = "17:07:30";
 
 export function timeToMinutes(time: string): number {
   const parts = time.split(":").map(Number);
@@ -202,7 +202,7 @@ export function calculateWorkTimeRange(
 
 /**
  * Gibt Standard-Arbeitszeiten für einen Tag zurück
- * MO-DO: 07:00–17:08, mit Vormittags- und Mittagspause
+ * MO-DO: 07:00–17:07:30, mit Vormittags- und Mittagspause
  */
 export function getDefaultWorkTimes(date: Date): WorkTimePreset | null {
   if (!isWorkingDay(date)) return null;

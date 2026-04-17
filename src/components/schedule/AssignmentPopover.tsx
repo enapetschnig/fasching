@@ -56,7 +56,7 @@ export function AssignmentPopover({
     setSelectedProject(assignment?.project_id || "");
     setNotizen(assignment?.notizen || "");
     setStartTime(assignment?.start_time || "07:00");
-    setEndTime(assignment?.end_time || "17:08");
+    setEndTime(assignment?.end_time || "17:07:30");
   }, [assignment, open]);
 
   if (!profile || !date) return null;

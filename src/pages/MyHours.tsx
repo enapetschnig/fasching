@@ -759,6 +759,7 @@ const MyHours = () => {
                     <Input
                       id="edit-end-time"
                       type="time"
+                      step="1"
                       value={editingEntry.end_time || ''}
                       onChange={(e) => setEditingEntry({...editingEntry, end_time: e.target.value})}
                     />

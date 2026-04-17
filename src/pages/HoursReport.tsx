@@ -923,7 +923,7 @@ export default function HoursReport() {
             normalHours > 0 ? "12:00" : "",
             normalHours > 0 ? "12:00 - 12:30" : "",
             normalHours > 0 ? "12:30" : "",
-            normalHours > 0 ? "17:08" : "",
+            normalHours > 0 ? "17:07:30" : "",
             normalHours.toFixed(2),
             ortText,
             projektName,
@@ -1608,7 +1608,7 @@ export default function HoursReport() {
                       <Label>Bis</Label>
                       <Input
                         type="time"
-                        step="900"
+                        step="1"
                         value={editingEntry.end_time}
                         onChange={(e) => setEditingEntry((c) => c ? { ...c, end_time: e.target.value } : c)}
                         className="font-mono"
