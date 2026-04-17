@@ -19,8 +19,6 @@ interface VoiceRecorderProps {
   compact?: boolean;
   /** Context for the AI prompt. "arbeiten" = report style, "material" = list of materials */
   context?: "arbeiten" | "material";
-  /** Existing text – passed to AI so voice input extends instead of replaces */
-  existing?: string;
   /** Custom label for the non-compact button */
   label?: string;
 }
@@ -33,7 +31,7 @@ const isSpeechRecognitionSupported = () => {
   );
 };
 
-export function VoiceRecorder({ onResult, disabled, compact, context, existing, label }: VoiceRecorderProps) {
+export function VoiceRecorder({ onResult, disabled, compact, context, label }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -122,7 +120,7 @@ export function VoiceRecorder({ onResult, disabled, compact, context, existing, 
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const { data, error: fnError } = await supabase.functions.invoke("parse-voice-input", {
-        body: { transcript: text, context: context || "arbeiten", existing: existing || "" },
+        body: { transcript: text, context: context || "arbeiten" },
         headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
       });
 

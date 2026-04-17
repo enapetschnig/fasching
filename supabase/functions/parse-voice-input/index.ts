@@ -17,7 +17,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    const { transcript, context, existing } = await req.json();
+    const { transcript, context } = await req.json();
 
     if (!transcript || typeof transcript !== "string") {
       return new Response(
@@ -75,12 +75,8 @@ Beispiel-Output:
 
 Antworte NUR mit der Material-Liste, kein JSON, kein Markdown, kein Drumherum.`;
 
-    let systemPrompt = contextKind === "material" ? materialPrompt : arbeitenPrompt;
-
-    // Existing content: append so user can keep adding via voice instead of replacing
-    const userContent = existing && typeof existing === "string" && existing.trim()
-      ? `Bestehender Text (NICHT ändern, nur sauber am Ende fortschreiben):\n${existing.trim()}\n\n---\nNeu diktiert:\n${transcript}`
-      : transcript;
+    const systemPrompt = contextKind === "material" ? materialPrompt : arbeitenPrompt;
+    const userContent = transcript;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",

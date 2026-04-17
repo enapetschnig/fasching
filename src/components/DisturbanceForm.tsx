@@ -835,12 +835,15 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                 <VoiceRecorder
                   compact
                   context="arbeiten"
-                  existing={formData.beschreibung}
                   disabled={saving}
                   onResult={(data) => {
-                    if (data.beschreibung) {
-                      setFormData((prev) => ({ ...prev, beschreibung: data.beschreibung }));
-                    }
+                    if (!data.beschreibung) return;
+                    setFormData((prev) => ({
+                      ...prev,
+                      beschreibung: prev.beschreibung.trim()
+                        ? `${prev.beschreibung.trimEnd()}\n${data.beschreibung.trim()}`
+                        : data.beschreibung,
+                    }));
                   }}
                 />
               </div>
@@ -863,12 +866,15 @@ export const DisturbanceForm = ({ open, onOpenChange, onSuccess, editData }: Dis
                 <VoiceRecorder
                   compact
                   context="material"
-                  existing={formData.materialText}
                   disabled={saving}
                   onResult={(data) => {
-                    if (data.beschreibung) {
-                      setFormData((prev) => ({ ...prev, materialText: data.beschreibung }));
-                    }
+                    if (!data.beschreibung) return;
+                    setFormData((prev) => ({
+                      ...prev,
+                      materialText: prev.materialText.trim()
+                        ? `${prev.materialText.trimEnd()}\n${data.beschreibung.trim()}`
+                        : data.beschreibung,
+                    }));
                   }}
                 />
               </div>
