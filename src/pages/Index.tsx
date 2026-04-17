@@ -658,12 +658,12 @@ export default function Index() {
                 </Card>
               ))}
             </div>
-            <Button 
-              variant="outline" 
-              className="w-full mt-3" 
-              onClick={() => navigate("/my-hours")}
+            <Button
+              variant="outline"
+              className="w-full mt-3"
+              onClick={() => navigate(isAdmin ? "/hours-report" : "/my-hours")}
             >
-              Alle Stunden anzeigen
+              {isAdmin ? "Zur Stundenauswertung" : "Alle Stunden anzeigen"}
             </Button>
           </div>
         )}

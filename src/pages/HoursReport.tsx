@@ -252,76 +252,79 @@ export default function HoursReport() {
 
   const fetchEmployeeBalances = async (userId: string) => {
     try {
-      // Monatsbereich berechnen
       const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
       const endDate = `${year}-${String(month).padStart(2, "0")}-${new Date(year, month, 0).getDate()}`;
 
-      // Nur Einträge des ausgewählten Monats laden
-      const { data: monthEntries } = await supabase
-        .from("time_entries")
-        .select("datum, stunden, taetigkeit")
-        .eq("user_id", userId)
-        .gte("datum", startDate)
-        .lte("datum", endDate);
+      // Monats-Einträge UND alle Einträge (für Gesamt-ZA-Saldo)
+      const [{ data: monthEntries }, { data: allEntries }, { data: zaAdj }, { data: vacAdj }] = await Promise.all([
+        supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", userId).gte("datum", startDate).lte("datum", endDate),
+        supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", userId),
+        supabase.from("za_adjustments").select("hours").eq("user_id", userId),
+        supabase.from("vacation_adjustments").select("days").eq("user_id", userId),
+      ]);
 
-      // Korrekturen des Monats
-      const { data: zaAdj } = await supabase
-        .from("za_adjustments")
-        .select("hours, created_at")
-        .eq("user_id", userId)
-        .gte("created_at", `${startDate}T00:00:00`)
-        .lte("created_at", `${endDate}T23:59:59`);
+      // MONAT: Über-/Minusstunden + ZA genommen (nur für diesen Monat)
+      let zaEarnedMonth = 0;
+      let zaUsedMonth = 0;
+      const vacationDatesMonth = new Set<string>();
 
-      const { data: vacAdj } = await supabase
-        .from("vacation_adjustments")
-        .select("days, created_at")
-        .eq("user_id", userId)
-        .gte("created_at", `${startDate}T00:00:00`)
-        .lte("created_at", `${endDate}T23:59:59`);
-
-      let zaEarned = 0;
-      let zaUsed = 0;
-      const vacationDates = new Set<string>();
-
-      // Gruppiere nach Tag: Alle Stunden (Arbeit + Abwesenheit) zählen zum Tagessoll
-      const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
+      const byDayMonth: Record<string, { total: number; hasAbsence: boolean }> = {};
       (monthEntries || []).forEach((e) => {
         if (e.taetigkeit === "Zeitausgleich") {
-          zaUsed += Number(e.stunden);
-          return; // ZA wird separat als "genommen" gezählt
+          zaUsedMonth += Number(e.stunden);
+          return;
         }
-        if (!byDay[e.datum]) byDay[e.datum] = { total: 0, hasAbsence: false };
-        byDay[e.datum].total += Number(e.stunden);
+        if (!byDayMonth[e.datum]) byDayMonth[e.datum] = { total: 0, hasAbsence: false };
+        byDayMonth[e.datum].total += Number(e.stunden);
         if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
-          byDay[e.datum].hasAbsence = true;
-          if (e.taetigkeit === "Urlaub") vacationDates.add(e.datum);
+          byDayMonth[e.datum].hasAbsence = true;
+          if (e.taetigkeit === "Urlaub") vacationDatesMonth.add(e.datum);
         }
       });
-
-      // Über-/Minusstunden pro Tag (Zeitzone-sicher mit T00:00:00)
-      Object.entries(byDay).forEach(([datum, { total, hasAbsence }]) => {
+      Object.entries(byDayMonth).forEach(([datum, { total, hasAbsence }]) => {
         const date = new Date(datum + "T00:00:00");
         const target = getNormalWorkingHours(date);
-        // Nur-Abwesenheit-Tage: Soll ist erfüllt, keine Differenz
         if (hasAbsence && total <= target + 0.01) return;
-        if (target === 0 && total > 0) {
-          zaEarned += total; // FR/SA/SO Arbeit = alles Überstunde
-        } else if (target > 0) {
-          zaEarned += total - target; // kann negativ sein
+        if (target === 0 && total > 0) zaEarnedMonth += total;
+        else if (target > 0) zaEarnedMonth += total - target;
+      });
+
+      // GESAMT: ZA-Saldo (all-time, konsistent mit MyHours/Admin)
+      let zaEarnedTotal = 0;
+      let zaUsedTotal = 0;
+      const vacationDatesTotal = new Set<string>();
+      const byDayTotal: Record<string, { total: number; hasAbsence: boolean }> = {};
+      (allEntries || []).forEach((e) => {
+        if (e.taetigkeit === "Zeitausgleich") {
+          zaUsedTotal += Number(e.stunden);
+          return;
         }
+        if (!byDayTotal[e.datum]) byDayTotal[e.datum] = { total: 0, hasAbsence: false };
+        byDayTotal[e.datum].total += Number(e.stunden);
+        if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
+          byDayTotal[e.datum].hasAbsence = true;
+          if (e.taetigkeit === "Urlaub") vacationDatesTotal.add(e.datum);
+        }
+      });
+      Object.entries(byDayTotal).forEach(([datum, { total, hasAbsence }]) => {
+        const date = new Date(datum + "T00:00:00");
+        const target = getNormalWorkingHours(date);
+        if (hasAbsence && total <= target + 0.01) return;
+        if (target === 0 && total > 0) zaEarnedTotal += total;
+        else if (target > 0) zaEarnedTotal += total - target;
       });
 
       const zaAdjustments = (zaAdj || []).reduce((sum, a) => sum + Number(a.hours), 0);
       const vacationGranted = (vacAdj || []).reduce((sum, a) => sum + Number(a.days), 0);
 
       setEmployeeBalances({
-        zaEarned: Math.round(zaEarned * 1000) / 1000,
+        zaEarned: Math.round(zaEarnedMonth * 1000) / 1000, // Monat
         zaAdjustments,
-        zaUsed,
-        zaBalance: Math.round((zaEarned + zaAdjustments - zaUsed) * 1000) / 1000,
+        zaUsed: zaUsedMonth, // Monat
+        zaBalance: Math.round((zaEarnedTotal + zaAdjustments - zaUsedTotal) * 1000) / 1000, // GESAMT all-time
         vacationGranted,
-        vacationUsed: vacationDates.size,
-        vacationBalance: vacationGranted - vacationDates.size,
+        vacationUsed: vacationDatesTotal.size, // all-time
+        vacationBalance: vacationGranted - vacationDatesTotal.size, // all-time
       });
     } catch (err) {
       console.error("Error fetching employee balances:", err);
@@ -1250,10 +1253,11 @@ export default function HoursReport() {
                 {selectedUserId && employeeBalances && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-                      <p className="text-sm text-blue-600 dark:text-blue-400 font-medium">ZA-Saldo</p>
+                      <p className="text-sm text-blue-600 dark:text-blue-400 font-medium">ZA-Saldo gesamt</p>
                       <p className={`text-xl font-bold ${employeeBalances.zaBalance >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {employeeBalances.zaBalance >= 0 ? "+" : ""}{employeeBalances.zaBalance.toFixed(1)}h
                       </p>
+                      <p className="text-xs text-muted-foreground">aktueller Kontostand</p>
                     </div>
                     <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
                       <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">Urlaub übrig</p>
@@ -1263,13 +1267,14 @@ export default function HoursReport() {
                       <p className="text-xs text-muted-foreground">{employeeBalances.vacationUsed} von {employeeBalances.vacationGranted} verbraucht</p>
                     </div>
                     <div className={`rounded-lg p-3 border ${employeeBalances.zaEarned >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
-                      <p className={`text-sm font-medium ${employeeBalances.zaEarned >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>Über-/Minusstunden</p>
+                      <p className={`text-sm font-medium ${employeeBalances.zaEarned >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>Über-/Minus im Monat</p>
                       <p className={`text-xl font-bold ${employeeBalances.zaEarned >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {employeeBalances.zaEarned >= 0 ? "+" : ""}{employeeBalances.zaEarned.toFixed(1)}h
                       </p>
+                      <p className="text-xs text-muted-foreground">nur eingetragene Tage</p>
                     </div>
                     <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
-                      <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">ZA genommen</p>
+                      <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">ZA im Monat genommen</p>
                       <p className="text-xl font-bold text-foreground">-{employeeBalances.zaUsed.toFixed(1)}h</p>
                     </div>
                   </div>
@@ -1551,7 +1556,7 @@ export default function HoursReport() {
                       <Label>Bis</Label>
                       <Input
                         type="time"
-                        step="900"
+                        step="1"
                         value={editingEntry.end_time}
                         onChange={(e) => setEditingEntry((c) => c ? { ...c, end_time: e.target.value } : c)}
                         className="font-mono"

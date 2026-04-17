@@ -1681,30 +1681,27 @@ function ZAOverviewSection({ profiles }: { profiles: { id: string; vorname: stri
     const result = activeProfiles.map(profile => {
       const userEntries = allEntries.filter(e => e.user_id === profile.id);
 
-      // Group entries by date and sum hours per day
-      const dailyHours: Record<string, { total: number; isZA: boolean }> = {};
+      // Gleiche Logik wie HoursReport und MyHours (Konsistenz)
+      const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
+      const absenceTypes = ["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"];
       userEntries.forEach(e => {
-        if (!dailyHours[e.datum]) dailyHours[e.datum] = { total: 0, isZA: e.taetigkeit === "Zeitausgleich" };
-        if (e.taetigkeit !== "Zeitausgleich") {
-          dailyHours[e.datum].total += Number(e.stunden);
+        if (e.taetigkeit === "Zeitausgleich") return; // ZA separat
+        if (!byDay[e.datum]) byDay[e.datum] = { total: 0, hasAbsence: false };
+        byDay[e.datum].total += Number(e.stunden);
+        if (absenceTypes.includes(e.taetigkeit || "")) {
+          byDay[e.datum].hasAbsence = true;
         }
       });
 
-      // Calculate overtime: hours over DAILY_WORK_HOURS on MO-DO, all hours on FR/SA/SO
       let accrued = 0;
-      const absenceTypes = ["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch", "Zeitausgleich"];
-      Object.entries(dailyHours).forEach(([datum, info]) => {
+      Object.entries(byDay).forEach(([datum, { total, hasAbsence }]) => {
         const dateObj = new Date(datum + "T00:00:00");
-        const dayEntries = userEntries.filter(e => e.datum === datum);
-        const hasAbsenceOnly = dayEntries.every(e => absenceTypes.includes(e.taetigkeit || ""));
-        if (hasAbsenceOnly) return;
-
-        if (isWorkingDay(dateObj)) {
-          // MO-DO: Differenz zum Tagessoll (positiv = Überstunden, negativ = Minusstunden)
-          accrued += info.total - DAILY_WORK_HOURS;
-        } else {
-          // FR/SA/SO: all worked hours count as overtime
-          accrued += info.total;
+        const target = getNormalWorkingHours(dateObj);
+        if (hasAbsence && total <= target + 0.01) return;
+        if (target === 0 && total > 0) {
+          accrued += total;
+        } else if (target > 0) {
+          accrued += total - target;
         }
       });
 

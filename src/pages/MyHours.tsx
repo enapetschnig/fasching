@@ -83,35 +83,50 @@ const MyHours = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Fetch all data in parallel
-    const [zaAdj, vacAdj, zaUsed, vacUsed, workEntries] = await Promise.all([
+    // Konsistent mit HoursReport: Alle Einträge laden und gleiche Logik nutzen
+    const [zaAdj, vacAdj, allEntries] = await Promise.all([
       supabase.from("za_adjustments").select("hours").eq("user_id", user.id),
       supabase.from("vacation_adjustments").select("days").eq("user_id", user.id),
-      supabase.from("time_entries").select("stunden").eq("user_id", user.id).eq("taetigkeit", "Zeitausgleich"),
-      supabase.from("time_entries").select("datum").eq("user_id", user.id).eq("taetigkeit", "Urlaub"),
-      supabase.from("time_entries").select("datum, stunden").eq("user_id", user.id).neq("taetigkeit", "Urlaub").neq("taetigkeit", "Krankenstand").neq("taetigkeit", "Zeitausgleich").neq("taetigkeit", "Weiterbildung").neq("taetigkeit", "Arztbesuch"),
+      supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", user.id),
     ]);
 
-    // ZA: sum of daily overtime (hours worked beyond 9.625h/day)
-    // Group work entries by date and sum hours per day
-    const dailyHours = new Map<string, number>();
-    for (const entry of (workEntries.data || [])) {
-      const current = dailyHours.get(entry.datum) || 0;
-      dailyHours.set(entry.datum, current + Number(entry.stunden));
-    }
     let earned = 0;
-    dailyHours.forEach((hours, datum) => {
-      const date = new Date(datum + 'T00:00:00');
-      earned += calculateDailyOvertime(date, hours);
+    let zaUsedHours = 0;
+    const vacDates = new Set<string>();
+
+    // Gruppiere nach Tag (gleiche Logik wie HoursReport)
+    const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
+    (allEntries.data || []).forEach((e) => {
+      if (e.taetigkeit === "Zeitausgleich") {
+        zaUsedHours += Number(e.stunden);
+        return;
+      }
+      if (!byDay[e.datum]) byDay[e.datum] = { total: 0, hasAbsence: false };
+      byDay[e.datum].total += Number(e.stunden);
+      if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
+        byDay[e.datum].hasAbsence = true;
+        if (e.taetigkeit === "Urlaub") vacDates.add(e.datum);
+      }
     });
+
+    // Über-/Minusstunden (Zeitzone-sicher)
+    Object.entries(byDay).forEach(([datum, { total, hasAbsence }]) => {
+      const date = new Date(datum + 'T00:00:00');
+      const target = getNormalWorkingHours(date);
+      if (hasAbsence && total <= target + 0.01) return; // Abwesenheit erfüllt Soll
+      if (target === 0 && total > 0) {
+        earned += total;
+      } else if (target > 0) {
+        earned += total - target;
+      }
+    });
+
     const adjustments = (zaAdj.data || []).reduce((s, r) => s + Number(r.hours), 0);
-    const zaUsedHours = (zaUsed.data || []).reduce((s, r) => s + Number(r.stunden), 0);
     setZaSaldo({ earned, adjustments, used: zaUsedHours, balance: earned + adjustments - zaUsedHours });
 
     // Urlaub
     const granted = (vacAdj.data || []).reduce((s, r) => s + Number(r.days), 0);
-    const uniqueVacDays = new Set((vacUsed.data || []).map(e => e.datum));
-    const vacUsedDays = uniqueVacDays.size;
+    const vacUsedDays = vacDates.size;
     setVacationSaldo({ granted, used: vacUsedDays, balance: granted - vacUsedDays });
   };
 

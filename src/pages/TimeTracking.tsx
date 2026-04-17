@@ -861,7 +861,10 @@ const TimeTracking = () => {
                 <Clock className="h-5 w-5" />
                 <CardTitle>Zeiterfassung</CardTitle>
               </div>
-              <Button variant="outline" onClick={() => setShowAbsenceDialog(true)} className="gap-2">
+              <Button variant="outline" onClick={() => {
+                setAbsenceData((prev) => ({ ...prev, date: selectedDate, dateFrom: selectedDate, dateTo: selectedDate }));
+                setShowAbsenceDialog(true);
+              }} className="gap-2">
                 <Calendar className="h-4 w-4" />
                 Abwesenheit
               </Button>
@@ -1063,7 +1066,7 @@ const TimeTracking = () => {
                             <Label>Bis</Label>
                             <Input
                               type="time"
-                              step="900"
+                              step="1"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
                               className="text-center font-mono"

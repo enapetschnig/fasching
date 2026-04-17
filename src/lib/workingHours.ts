@@ -37,8 +37,8 @@ export const DAILY_WORK_MINUTES = 577.5; // 9h 37.5min
 export const DAILY_WORK_HOURS = 9.625; // 9h 37.5min
 export const WEEKLY_TARGET_HOURS = 38.5;
 export const DEFAULT_START_TIME = "07:00";
-// 07:00 + 9h37.5min Arbeit + 30min Mittagspause = 17:07:30 (exakt)
-// Time-Inputs benötigen step="1" um Sekunden zu unterstützen
+// MO-DO Regelende exakt: 17:07:30 = 07:00 + 9h37.5min + 30min Mittagspause
+// Bis-Feld nutzt step="1" für Sekunden-Unterstützung
 export const DEFAULT_END_TIME = "17:07:30";
 export const DEFAULT_END_TIME_DISPLAY = "17:07:30";
 
