@@ -471,7 +471,7 @@ export default function Admin() {
 
     try {
       const { data, error } = await supabase.functions.invoke('send-invitation', {
-        body: { telefonnummer: inviteTelefon }
+        body: { telefonnummer: inviteTelefon, appUrl: window.location.origin }
       });
 
       if (error) throw error;
@@ -515,7 +515,7 @@ export default function Admin() {
 
     try {
       const { data, error } = await supabase.functions.invoke('send-email-invitation', {
-        body: { email: inviteEmail }
+        body: { email: inviteEmail, appUrl: window.location.origin }
       });
 
       if (error) throw error;

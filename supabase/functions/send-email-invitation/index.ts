@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       throw new Error('Forbidden: Admin access required');
     }
 
-    const { email } = await req.json();
+    const { email, appUrl: appUrlFromRequest } = await req.json();
     if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
       throw new Error('Ungültige E-Mail-Adresse');
     }
@@ -40,8 +40,8 @@ Deno.serve(async (req) => {
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
     if (!resendApiKey) throw new Error('RESEND_API_KEY not configured');
 
-    const appUrl = 'https://fasching-gebaeudetechnik.app';
-    const registrationLink = `${appUrl}/auth`;
+    const appUrl = appUrlFromRequest || Deno.env.get('APP_URL') || 'https://fasching-gebaeudetechnik.app';
+    const registrationLink = `${appUrl.replace(/\/$/, '')}/auth`;
 
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',

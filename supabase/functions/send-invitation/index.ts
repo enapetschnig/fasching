@@ -7,6 +7,7 @@ const corsHeaders = {
 
 interface InvitationRequest {
   telefonnummer: string;
+  appUrl?: string;
 }
 
 Deno.serve(async (req) => {
@@ -51,7 +52,7 @@ Deno.serve(async (req) => {
     }
 
     // Parse request body
-    const { telefonnummer }: InvitationRequest = await req.json();
+    const { telefonnummer, appUrl: appUrlFromRequest }: InvitationRequest = await req.json();
     console.log('Processing invitation for:', telefonnummer);
 
     // Validate phone number (E.164 format: +43...)
@@ -68,9 +69,9 @@ Deno.serve(async (req) => {
       throw new Error('Twilio credentials not configured');
     }
 
-    // Generate registration link
-    const appUrl = 'https://fasching-gebaeudetechnik.app';
-    const registrationLink = `${appUrl}/auth`;
+    // Generate registration link (from request origin, fallback to env, fallback to default)
+    const appUrl = appUrlFromRequest || Deno.env.get('APP_URL') || 'https://fasching-gebaeudetechnik.app';
+    const registrationLink = `${appUrl.replace(/\/$/, '')}/auth`;
 
     // Compose SMS message
     const smsText = `Willkommen bei FASCHING Gebäudetechnik! Bitte registriere dich in unserer Mitarbeiter-App:\n${registrationLink}`;
