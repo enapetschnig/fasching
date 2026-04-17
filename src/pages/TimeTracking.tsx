@@ -38,6 +38,7 @@ import {
   LUNCH_BREAK_MINUTES,
   BREAKFAST_BREAK_START,
   BREAKFAST_BREAK_END,
+  DAILY_WORK_HOURS,
 } from "@/lib/workingHours";
 
 type Project = {
@@ -114,7 +115,6 @@ const TimeTracking = () => {
     date: new Date().toISOString().split("T")[0],
     type: "urlaub" as "urlaub" | "krankenstand" | "weiterbildung" | "arztbesuch" | "zeitausgleich",
     document: null as File | null,
-    customHours: "",
     rangeMode: false,
     dateFrom: new Date().toISOString().split("T")[0],
     dateTo: new Date().toISOString().split("T")[0],
@@ -592,19 +592,20 @@ const TimeTracking = () => {
           continue;
         }
 
-        const absenceTimes = calculateAbsenceTimes(dateObj, hours);
         inserts.push({
           user_id: user.id,
           datum: day,
           project_id: null,
           taetigkeit: getAbsenceLabel(absenceData.type),
           stunden: hours,
-          start_time: absenceTimes.start_time,
-          end_time: absenceTimes.end_time,
-          pause_minutes: absenceTimes.pause_minutes,
-          pause_start: absenceTimes.pause_start,
-          pause_end: absenceTimes.pause_end,
+          start_time: DEFAULT_START_TIME,
+          end_time: DEFAULT_END_TIME,
+          pause_minutes: LUNCH_BREAK_MINUTES,
+          pause_start: LUNCH_BREAK_START,
+          pause_end: LUNCH_BREAK_END,
           location_type: "baustelle",
+          has_breakfast_break: true,
+          has_lunch_break: true,
           notizen: null,
           week_type: null,
         });
@@ -628,36 +629,40 @@ const TimeTracking = () => {
       return;
     }
 
-    // Single day absence
-    const selectedDateObj = new Date(absenceData.date);
-    const workingHours = absenceData.customHours ? parseFloat(absenceData.customHours) : getNormalWorkingHours(selectedDateObj);
+    // Single day absence: Regelarbeitszeit automatisch buchen
+    const selectedDateObj = new Date(absenceData.date + "T00:00:00");
+    const workingHours = getNormalWorkingHours(selectedDateObj);
+    if (workingHours <= 0) {
+      toast({ variant: "destructive", title: "Kein Arbeitstag", description: "An diesem Tag (FR/SA/SO) wird nicht gearbeitet." });
+      setSubmittingAbsence(false);
+      return;
+    }
     const { data: existingEntries } = await supabase
       .from("time_entries")
       .select("id, stunden, taetigkeit")
       .eq("user_id", user.id)
       .eq("datum", absenceData.date);
 
-    const existingHours = (existingEntries || []).reduce((sum, entry) => sum + Number(entry.stunden), 0);
-    const dailyTarget = getTotalWorkingHours(selectedDateObj);
-    if (existingHours + workingHours > dailyTarget + 0.01) {
-      toast({ variant: "destructive", title: "Stunden überschritten", description: `Bereits ${existingHours.toFixed(1)}h gebucht.` });
+    if ((existingEntries || []).length > 0) {
+      toast({ variant: "destructive", title: "Bereits Einträge vorhanden", description: "An diesem Tag sind schon Stunden gebucht." });
       setSubmittingAbsence(false);
       return;
     }
 
-    const absenceTimes = calculateAbsenceTimes(selectedDateObj, workingHours);
     const { error } = await supabase.from("time_entries").insert({
       user_id: user.id,
       datum: absenceData.date,
       project_id: null,
       taetigkeit: getAbsenceLabel(absenceData.type),
       stunden: workingHours,
-      start_time: absenceTimes.start_time,
-      end_time: absenceTimes.end_time,
-      pause_minutes: absenceTimes.pause_minutes,
-      pause_start: absenceTimes.pause_start,
-      pause_end: absenceTimes.pause_end,
+      start_time: DEFAULT_START_TIME,
+      end_time: DEFAULT_END_TIME,
+      pause_minutes: LUNCH_BREAK_MINUTES,
+      pause_start: LUNCH_BREAK_START,
+      pause_end: LUNCH_BREAK_END,
       location_type: "baustelle",
+      has_breakfast_break: true,
+      has_lunch_break: true,
       notizen: null,
       week_type: null,
     });
@@ -1241,12 +1246,9 @@ const TimeTracking = () => {
                 </Select>
               </div>
 
-              {!absenceData.rangeMode && (
-                <div>
-                  <Label>Stunden (optional)</Label>
-                  <Input type="number" step="0.5" min="0" max="24" value={absenceData.customHours} onChange={(e) => setAbsenceData({ ...absenceData, customHours: e.target.value })} placeholder="Leer lassen für automatische Berechnung" />
-                </div>
-              )}
+              <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+                Die Regelarbeitszeit (07:00–17:07:30, {DAILY_WORK_HOURS}h) mit Vormittags- und Mittagspause wird automatisch für alle Arbeitstage (MO–DO) gebucht.
+              </div>
 
               <div className="flex gap-2 justify-end">
                 <Button variant="outline" onClick={() => setShowAbsenceDialog(false)} disabled={submittingAbsence}>Abbrechen</Button>

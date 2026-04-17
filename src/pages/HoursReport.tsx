@@ -110,6 +110,8 @@ interface EmployeeBalances {
   vacationGranted: number;
   vacationUsed: number;
   vacationBalance: number;
+  monthComplete: boolean;
+  missingDays: number;
 }
 
 const monthNames = [
@@ -263,10 +265,8 @@ export default function HoursReport() {
         supabase.from("vacation_adjustments").select("days").eq("user_id", userId),
       ]);
 
-      // MONAT: Über-/Minusstunden + ZA genommen (nur für diesen Monat)
-      let zaEarnedMonth = 0;
+      // MONAT: Über-/Minus nur wenn alle erwarteten MO-DO-Tage eingetragen sind
       let zaUsedMonth = 0;
-      const vacationDatesMonth = new Set<string>();
 
       const byDayMonth: Record<string, { total: number; hasAbsence: boolean }> = {};
       (monthEntries || []).forEach((e) => {
@@ -278,16 +278,36 @@ export default function HoursReport() {
         byDayMonth[e.datum].total += Number(e.stunden);
         if (["Urlaub", "Krankenstand", "Weiterbildung", "Arztbesuch"].includes(e.taetigkeit || "")) {
           byDayMonth[e.datum].hasAbsence = true;
-          if (e.taetigkeit === "Urlaub") vacationDatesMonth.add(e.datum);
         }
       });
-      Object.entries(byDayMonth).forEach(([datum, { total, hasAbsence }]) => {
-        const date = new Date(datum + "T00:00:00");
-        const target = getNormalWorkingHours(date);
-        if (hasAbsence && total <= target + 0.01) return;
-        if (target === 0 && total > 0) zaEarnedMonth += total;
-        else if (target > 0) zaEarnedMonth += total - target;
-      });
+
+      // Erwartete MO-DO-Tage bis heute (laufender Monat) oder Monatsende (vergangener Monat)
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const lastDayOfMonth = new Date(year, month, 0);
+      const endCheck = lastDayOfMonth < today ? lastDayOfMonth : today;
+      const expectedWorkdays: string[] = [];
+      for (let d = 1; d <= lastDayOfMonth.getDate(); d++) {
+        const dateObj = new Date(year, month - 1, d);
+        if (dateObj > endCheck) break;
+        if (isWorkingDay(dateObj)) {
+          expectedWorkdays.push(dateObj.toISOString().split("T")[0]);
+        }
+      }
+      const missingDays = expectedWorkdays.filter((d) => !byDayMonth[d]).length;
+      const monthComplete = missingDays === 0;
+
+      // Über-/Minus nur berechnen wenn Monat vollständig
+      let zaEarnedMonth = 0;
+      if (monthComplete) {
+        Object.entries(byDayMonth).forEach(([datum, { total, hasAbsence }]) => {
+          const date = new Date(datum + "T00:00:00");
+          const target = getNormalWorkingHours(date);
+          if (hasAbsence && total <= target + 0.01) return;
+          if (target === 0 && total > 0) zaEarnedMonth += total;
+          else if (target > 0) zaEarnedMonth += total - target;
+        });
+      }
 
       // GESAMT: ZA-Saldo (all-time, konsistent mit MyHours/Admin)
       let zaEarnedTotal = 0;
@@ -318,13 +338,15 @@ export default function HoursReport() {
       const vacationGranted = (vacAdj || []).reduce((sum, a) => sum + Number(a.days), 0);
 
       setEmployeeBalances({
-        zaEarned: Math.round(zaEarnedMonth * 1000) / 1000, // Monat
+        zaEarned: Math.round(zaEarnedMonth * 1000) / 1000, // Monat (nur wenn komplett)
         zaAdjustments,
         zaUsed: zaUsedMonth, // Monat
         zaBalance: Math.round((zaEarnedTotal + zaAdjustments - zaUsedTotal) * 1000) / 1000, // GESAMT all-time
         vacationGranted,
-        vacationUsed: vacationDatesTotal.size, // all-time
-        vacationBalance: vacationGranted - vacationDatesTotal.size, // all-time
+        vacationUsed: vacationDatesTotal.size,
+        vacationBalance: vacationGranted - vacationDatesTotal.size,
+        monthComplete,
+        missingDays,
       });
     } catch (err) {
       console.error("Error fetching employee balances:", err);
@@ -1266,12 +1288,21 @@ export default function HoursReport() {
                       </p>
                       <p className="text-xs text-muted-foreground">{employeeBalances.vacationUsed} von {employeeBalances.vacationGranted} verbraucht</p>
                     </div>
-                    <div className={`rounded-lg p-3 border ${employeeBalances.zaEarned >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
-                      <p className={`text-sm font-medium ${employeeBalances.zaEarned >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>Über-/Minus im Monat</p>
-                      <p className={`text-xl font-bold ${employeeBalances.zaEarned >= 0 ? "text-green-600" : "text-red-600"}`}>
-                        {employeeBalances.zaEarned >= 0 ? "+" : ""}{employeeBalances.zaEarned.toFixed(1)}h
-                      </p>
-                      <p className="text-xs text-muted-foreground">nur eingetragene Tage</p>
+                    <div className={`rounded-lg p-3 border ${!employeeBalances.monthComplete ? "bg-muted/40 border-border" : employeeBalances.zaEarned >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
+                      <p className={`text-sm font-medium ${!employeeBalances.monthComplete ? "text-muted-foreground" : employeeBalances.zaEarned >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>Über-/Minus im Monat</p>
+                      {employeeBalances.monthComplete ? (
+                        <>
+                          <p className={`text-xl font-bold ${employeeBalances.zaEarned >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {employeeBalances.zaEarned >= 0 ? "+" : ""}{employeeBalances.zaEarned.toFixed(1)}h
+                          </p>
+                          <p className="text-xs text-muted-foreground">Monat vollständig</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-xl font-bold text-muted-foreground">—</p>
+                          <p className="text-xs text-muted-foreground">{employeeBalances.missingDays} Tag(e) fehlen</p>
+                        </>
+                      )}
                     </div>
                     <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg p-3">
                       <p className="text-sm text-orange-600 dark:text-orange-400 font-medium">ZA im Monat genommen</p>
