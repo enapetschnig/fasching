@@ -118,7 +118,9 @@ const TimeTracking = () => {
     rangeMode: false,
     dateFrom: new Date().toISOString().split("T")[0],
     dateTo: new Date().toISOString().split("T")[0],
-    zaHours: "4", // Nur für Zeitausgleich - variable Stunden
+    // Zeitausgleich: Von-Bis-Zeiten (eigene Logik, wird vom ZA-Konto abgebucht)
+    zaStart: "08:00",
+    zaEnd: "12:00",
   });
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([createDefaultBlock()]);
@@ -648,17 +650,6 @@ const TimeTracking = () => {
       return;
     }
 
-    // ZA-Stunden validieren
-    let zaHours = 0;
-    if (isZA) {
-      zaHours = parseFloat(absenceData.zaHours.replace(",", "."));
-      if (!Number.isFinite(zaHours) || zaHours <= 0 || zaHours > 12) {
-        toast({ variant: "destructive", title: "Ungültige Stunden", description: "Bitte 0.25 bis 12 Stunden eingeben." });
-        setSubmittingAbsence(false);
-        return;
-      }
-    }
-
     const { data: existingEntries } = await supabase
       .from("time_entries")
       .select("id, stunden, start_time, end_time, taetigkeit")
@@ -668,43 +659,49 @@ const TimeTracking = () => {
     const existing = existingEntries || [];
 
     if (isZA) {
-      // ZA: Prüfe ob schon ZA für diesen Tag existiert
-      if (existing.some((e) => e.taetigkeit === "Zeitausgleich")) {
-        toast({ variant: "destructive", title: "ZA bereits eingetragen", description: "Für diesen Tag ist schon Zeitausgleich gebucht." });
+      // ZA mit Von-Bis: eigene Logik, wird vom ZA-Konto abgezogen
+      const zaStart = absenceData.zaStart;
+      const zaEnd = absenceData.zaEnd;
+      if (!zaStart || !zaEnd) {
+        toast({ variant: "destructive", title: "Zeiten fehlen", description: "Bitte Von- und Bis-Zeit eingeben." });
         setSubmittingAbsence(false);
         return;
       }
-      // Prüfe Gesamtstunden-Obergrenze
-      const existingTotal = existing.reduce((s, e) => s + Number(e.stunden), 0);
-      if (existingTotal + zaHours > 12) {
-        toast({ variant: "destructive", title: "Zu viele Stunden", description: `Mit ${zaHours}h ZA würden es über 12h.` });
+      const startMin = timeToMinutes(zaStart);
+      const endMin = timeToMinutes(zaEnd);
+      if (endMin <= startMin) {
+        toast({ variant: "destructive", title: "Ungültige Zeit", description: "Bis-Zeit muss nach Von-Zeit liegen." });
+        setSubmittingAbsence(false);
+        return;
+      }
+      const zaHours = (endMin - startMin) / 60;
+      if (zaHours > 12) {
+        toast({ variant: "destructive", title: "Zu lang", description: "Maximal 12h ZA pro Tag." });
         setSubmittingAbsence(false);
         return;
       }
 
-      // ZA-Block am Ende des Tages platzieren (oder 07:00 wenn leer)
-      // Finde freie Zeit: nach letztem Eintrag oder 07:00
-      let startMinutes = timeToMinutes(DEFAULT_START_TIME);
-      if (existing.length > 0) {
-        const latestEnd = existing.reduce((max, e) => {
-          const end = timeToMinutes(e.end_time || "00:00");
-          return end > max ? end : max;
-        }, 0);
-        startMinutes = Math.max(startMinutes, latestEnd);
+      // Prüfe Überlappung mit bestehenden Einträgen
+      const hasOverlap = existing.some((e) => {
+        if (!e.start_time || !e.end_time) return false;
+        const eStart = timeToMinutes(e.start_time);
+        const eEnd = timeToMinutes(e.end_time);
+        return startMin < eEnd && endMin > eStart;
+      });
+      if (hasOverlap) {
+        toast({ variant: "destructive", title: "Zeitüberschneidung", description: "ZA-Zeit überschneidet sich mit bestehendem Eintrag." });
+        setSubmittingAbsence(false);
+        return;
       }
-      const endMinutes = startMinutes + zaHours * 60;
-      const pad = (n: number) => String(Math.floor(n)).padStart(2, "0");
-      const startStr = `${pad(startMinutes / 60)}:${pad(startMinutes % 60)}`;
-      const endStr = `${pad(endMinutes / 60)}:${pad(endMinutes % 60)}`;
 
       const { error } = await supabase.from("time_entries").insert({
         user_id: user.id,
         datum: absenceData.date,
         project_id: null,
         taetigkeit: "Zeitausgleich",
-        stunden: zaHours,
-        start_time: startStr,
-        end_time: endStr,
+        stunden: Math.round(zaHours * 1000) / 1000,
+        start_time: zaStart,
+        end_time: zaEnd,
         pause_minutes: 0,
         pause_start: null,
         pause_end: null,
@@ -718,7 +715,7 @@ const TimeTracking = () => {
       if (error) {
         toast({ variant: "destructive", title: "Fehler", description: "Konnte nicht gespeichert werden" });
       } else {
-        toast({ title: "Zeitausgleich gebucht", description: `${zaHours}h ZA für ${format(new Date(absenceData.date + "T00:00:00"), "dd.MM.")}` });
+        toast({ title: "Zeitausgleich gebucht", description: `${zaStart}–${zaEnd} (${zaHours.toFixed(2)}h) vom ZA-Konto abgezogen` });
         setShowAbsenceDialog(false);
         fetchExistingDayEntries(selectedDate);
       }
@@ -1332,20 +1329,41 @@ const TimeTracking = () => {
 
               {absenceData.type === "zeitausgleich" && !absenceData.rangeMode ? (
                 <>
-                  <div>
-                    <Label>Stunden ZA</Label>
-                    <Input
-                      type="number"
-                      step="0.25"
-                      min="0.25"
-                      max="12"
-                      value={absenceData.zaHours}
-                      onChange={(e) => setAbsenceData({ ...absenceData, zaHours: e.target.value })}
-                      className="font-mono text-center text-lg"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>ZA von</Label>
+                      <Input
+                        type="time"
+                        step="900"
+                        value={absenceData.zaStart}
+                        onChange={(e) => setAbsenceData({ ...absenceData, zaStart: e.target.value })}
+                        className="font-mono text-center"
+                      />
+                    </div>
+                    <div>
+                      <Label>ZA bis</Label>
+                      <Input
+                        type="time"
+                        step="900"
+                        value={absenceData.zaEnd}
+                        onChange={(e) => setAbsenceData({ ...absenceData, zaEnd: e.target.value })}
+                        className="font-mono text-center"
+                      />
+                    </div>
                   </div>
+                  {(() => {
+                    const s = timeToMinutes(absenceData.zaStart || "00:00");
+                    const e = timeToMinutes(absenceData.zaEnd || "00:00");
+                    const h = e > s ? (e - s) / 60 : 0;
+                    return (
+                      <div className="bg-primary/10 border border-primary/30 rounded-lg p-3 flex items-center justify-between">
+                        <span className="text-sm font-medium">ZA-Stunden</span>
+                        <span className="text-lg font-bold">{h.toFixed(2)} h</span>
+                      </div>
+                    );
+                  })()}
                   <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
-                    Der Zeitausgleich wird im Anschluss an bereits gebuchte Zeit gesetzt (oder ab 07:00). Den Rest des Tages normal in der Zeiterfassung eintragen.
+                    Der Zeitausgleich wird vom ZA-Konto abgezogen. Den Rest des Tages mit "Reststunden auffüllen" oder manuell in der Zeiterfassung eintragen.
                   </div>
                 </>
               ) : absenceData.type === "zeitausgleich" ? (
