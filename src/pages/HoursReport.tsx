@@ -787,8 +787,8 @@ export default function HoursReport() {
       noOvertime: finalizeBreakdown(noOvertimeBreakdown),
       totalHours: timeEntries.reduce((sum, entry) => sum + Number(entry.stunden || 0), 0),
       totalOvertime: (() => {
-        // Konsistent mit fetchEmployeeBalances: nach Tag gruppieren,
-        // Abwesenheiten erfüllen Tagessoll, ZA separat behandelt
+        // Nur wenn Monat vollständig: alle MO-DO-Tage bis heute/Monatsende
+        // müssen Einträge haben. Sonst 0 (wird auch UI-seitig ausgeblendet).
         const byDay: Record<string, { total: number; hasAbsence: boolean }> = {};
         timeEntries.forEach((e) => {
           if (e.taetigkeit === "Zeitausgleich") return;
@@ -798,6 +798,23 @@ export default function HoursReport() {
             byDay[e.datum].hasAbsence = true;
           }
         });
+
+        // Erwartete MO-DO Tage im Monat bis heute oder Monatsende
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+        const lastDayOfMonth = new Date(year, month, 0);
+        const endCheck = lastDayOfMonth < today ? lastDayOfMonth : today;
+        const expectedDays: string[] = [];
+        for (let d = 1; d <= lastDayOfMonth.getDate(); d++) {
+          const dateObj = new Date(year, month - 1, d);
+          if (dateObj > endCheck) break;
+          if (isWorkingDay(dateObj)) {
+            expectedDays.push(dateObj.toISOString().split("T")[0]);
+          }
+        }
+        const missing = expectedDays.filter((d) => !byDay[d]).length;
+        if (missing > 0) return 0; // Monat unvollständig → keine Überstunden
+
         return Object.entries(byDay).reduce((sum, [datum, { total, hasAbsence }]) => {
           const date = new Date(datum + "T00:00:00");
           const target = getNormalWorkingHours(date);
@@ -906,7 +923,7 @@ export default function HoursReport() {
             normalHours > 0 ? "12:00" : "",
             normalHours > 0 ? "12:00 - 12:30" : "",
             normalHours > 0 ? "12:30" : "",
-            normalHours > 0 ? "17:07:30" : "",
+            normalHours > 0 ? "17:08" : "",
             normalHours.toFixed(2),
             ortText,
             projektName,
@@ -1321,7 +1338,11 @@ export default function HoursReport() {
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Überstunden</p>
-                          <p className="text-2xl font-bold">{reportMetrics.totalOvertime.toFixed(2)} h</p>
+                          {employeeBalances?.monthComplete ? (
+                            <p className="text-2xl font-bold">{reportMetrics.totalOvertime.toFixed(2)} h</p>
+                          ) : (
+                            <p className="text-lg font-semibold text-muted-foreground">Monat unvollständig</p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1455,7 +1476,7 @@ export default function HoursReport() {
                                       )}
                                     </TableCell>
                                     <TableCell className="text-right">
-                                      {isLastEntry && dayOvertime !== 0 && (
+                                      {isLastEntry && dayOvertime !== 0 && employeeBalances?.monthComplete && (
                                         <span className={`font-medium ${dayOvertime > 0 ? "text-green-600" : "text-red-600"}`}>
                                           {dayOvertime > 0 ? "+" : ""}{dayOvertime.toFixed(2)} h
                                         </span>
@@ -1587,7 +1608,7 @@ export default function HoursReport() {
                       <Label>Bis</Label>
                       <Input
                         type="time"
-                        step="1"
+                        step="900"
                         value={editingEntry.end_time}
                         onChange={(e) => setEditingEntry((c) => c ? { ...c, end_time: e.target.value } : c)}
                         className="font-mono"

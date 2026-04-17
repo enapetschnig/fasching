@@ -205,7 +205,7 @@ const TimeTracking = () => {
     toast({ title: "Kopiert", description: `${newBlocks.length} Zeitblock(s) vom ${format(yesterday, "dd.MM.")} übernommen` });
   };
 
-  // Normaltag: 07:00–17:07:30, Projekt aus Plantafel, beide Pausen
+  // Normaltag: 07:00–17:08, Projekt aus Plantafel, beide Pausen
   const applyQuickDay = () => {
     const dateObj = new Date(selectedDate);
     if (!isWorkingDay(dateObj)) {
@@ -236,7 +236,7 @@ const TimeTracking = () => {
       : todayAssignments.length > 1
       ? " – Bitte Projekt manuell wählen (mehrere Einteilungen)"
       : "";
-    toast({ title: "Normaltag ausgefüllt", description: `07:00–17:07:30 mit Pausen${projectInfo}` });
+    toast({ title: "Normaltag ausgefüllt", description: `07:00–17:08 mit Pausen${projectInfo}` });
   };
 
   // Reststunden auffüllen: Lücken im Tag erkennen
@@ -247,7 +247,7 @@ const TimeTracking = () => {
     }
 
     const dayStart = timeToMinutes(DEFAULT_START_TIME); // 07:00
-    const dayEnd = timeToMinutes(DEFAULT_END_TIME); // 17:07:30
+    const dayEnd = timeToMinutes(DEFAULT_END_TIME); // 17:08
 
     // Bestehende Zeitblöcke sortieren
     const occupied = existingDayEntries
@@ -282,13 +282,12 @@ const TimeTracking = () => {
       return;
     }
 
-    // Minuten seit Mitternacht → HH:MM:SS String (mit Sekunden für 17:07:30)
+    // Minuten seit Mitternacht → HH:MM String (15-Min-Schritte auf Handy)
     const minsToStr = (totalMins: number): string => {
-      const totalSecs = Math.round(totalMins * 60);
-      const h = Math.floor(totalSecs / 3600);
-      const m = Math.floor((totalSecs % 3600) / 60);
-      const s = totalSecs % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      const rounded = Math.round(totalMins);
+      const h = Math.floor(rounded / 60);
+      const m = rounded % 60;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
     };
 
     const newBlocks: TimeBlock[] = gaps.map((gap) => {
@@ -994,7 +993,7 @@ const TimeTracking = () => {
                 <Label htmlFor="date">Datum</Label>
                 <Input id="date" type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} required />
                 <p className="text-sm text-muted-foreground">{format(new Date(selectedDate), "EEEE, dd. MMMM yyyy", { locale: de })}</p>
-                <p className="text-xs text-muted-foreground">MO–DO · 07:00 – 17:07:30</p>
+                <p className="text-xs text-muted-foreground">MO–DO · 07:00 – 17:08</p>
               </div>
 
               {/* Bestehende Tageseinträge */}
@@ -1183,7 +1182,7 @@ const TimeTracking = () => {
                             <Label>Bis</Label>
                             <Input
                               type="time"
-                              step="1"
+                              step="900"
                               value={block.endTime}
                               onChange={(e) => updateBlock(block.id, { endTime: e.target.value })}
                               className="text-center font-mono"
@@ -1428,7 +1427,7 @@ const TimeTracking = () => {
                 </div>
               ) : (
                 <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
-                  Die Regelarbeitszeit (07:00–17:07:30, {DAILY_WORK_HOURS}h) mit Vormittags- und Mittagspause wird automatisch für alle Arbeitstage (MO–DO) gebucht.
+                  Die Regelarbeitszeit (07:00–17:08, {DAILY_WORK_HOURS}h) mit Vormittags- und Mittagspause wird automatisch für alle Arbeitstage (MO–DO) gebucht.
                 </div>
               )}
 
