@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Zap, Calendar, Clock, User, Mail, Phone, MapPin, Edit, Trash2, Package, Plus, PenLine, Users, FolderOpen } from "lucide-react";
+import { Zap, Calendar, Clock, User, Mail, Phone, MapPin, Edit, Trash2, Package, Plus, PenLine, Users, FolderOpen, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -252,6 +252,27 @@ const DisturbanceDetail = () => {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!disturbance?.pdf_path) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from("project-reports")
+        .download(disturbance.pdf_path);
+      if (error || !data) throw error ?? new Error("Kein PDF gefunden");
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url;
+      const filename = disturbance.pdf_path.split("/").pop() || `Arbeitsbericht_${disturbance.id}.pdf`;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Fehler", description: err.message || "PDF konnte nicht geladen werden" });
+    }
+  };
+
   const handleToggleVerrechnet = async () => {
     if (!disturbance) return;
     
@@ -347,6 +368,12 @@ const DisturbanceDetail = () => {
               <Button onClick={() => setShowSignatureDialog(true)} className="gap-1">
                 <PenLine className="h-4 w-4" />
                 Zur Unterschrift
+              </Button>
+            )}
+            {(disturbance as any).pdf_path && (
+              <Button variant="outline" size="sm" onClick={handleDownloadPdf} className="gap-1">
+                <Download className="h-4 w-4" />
+                PDF herunterladen
               </Button>
             )}
             {canEdit && (
