@@ -21,16 +21,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     if (!transcript || typeof transcript !== "string") {
       return new Response(
-        JSON.stringify({ error: "Kein Transkript erhalten" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        JSON.stringify({ success: false, error: "Kein Transkript erhalten" }),
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
       return new Response(
-        JSON.stringify({ error: "OpenAI API Key nicht konfiguriert" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        JSON.stringify({ success: false, error: "OpenAI API Key nicht konfiguriert" }),
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
@@ -84,8 +84,8 @@ Regeln:
         ? "OpenAI API-Key ungültig. Bitte im Supabase Dashboard prüfen."
         : `OpenAI API Fehler: ${response.status}`;
       return new Response(
-        JSON.stringify({ error: errorMsg }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        JSON.stringify({ success: false, error: errorMsg }),
+        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
@@ -93,34 +93,42 @@ Regeln:
     const content = data.choices?.[0]?.message?.content;
 
     if (!content) {
+      // Fallback: Rohtranskript verwenden
       return new Response(
-        JSON.stringify({ error: "Keine Antwort von OpenAI erhalten" }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        JSON.stringify({
+          success: true,
+          data: {
+            beschreibung: transcript,
+            materials: [],
+            kundeName: null,
+            kundeAdresse: null,
+          },
+        }),
+        { headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
     // Parse the JSON response from OpenAI
-    let parsed: ParsedResult;
+    let parsed: ParsedResult = { beschreibung: "", materials: [] };
     try {
-      // Remove potential markdown code fences
       const cleanJson = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
       parsed = JSON.parse(cleanJson);
-      if (!parsed.beschreibung || typeof parsed.beschreibung !== "string") {
-        throw new Error("Keine Arbeitsbeschreibung extrahiert");
-      }
     } catch (parseErr) {
       console.error("Failed to parse OpenAI response:", content);
-      return new Response(
-        JSON.stringify({ error: parseErr instanceof Error ? parseErr.message : "KI-Antwort konnte nicht verarbeitet werden", raw: content }),
-        { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      // Fallback: Rohtranskript verwenden, damit die Aufnahme nicht verloren geht
+      parsed = { beschreibung: transcript, materials: [] };
     }
+
+    // Wenn die KI keine Beschreibung extrahiert hat, Rohtranskript zurückgeben
+    const beschreibung = (typeof parsed.beschreibung === "string" && parsed.beschreibung.trim())
+      ? parsed.beschreibung
+      : transcript;
 
     return new Response(
       JSON.stringify({
         success: true,
         data: {
-          beschreibung: parsed.beschreibung || "",
+          beschreibung,
           materials: Array.isArray(parsed.materials) ? parsed.materials : [],
           kundeName: parsed.kundeName || null,
           kundeAdresse: parsed.kundeAdresse || null,
@@ -131,8 +139,8 @@ Regeln:
   } catch (err) {
     console.error("parse-voice-input error:", err);
     return new Response(
-      JSON.stringify({ error: err.message || "Unbekannter Fehler" }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      JSON.stringify({ success: false, error: (err as Error)?.message || "Unbekannter Fehler" }),
+      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   }
 });
