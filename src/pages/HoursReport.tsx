@@ -695,6 +695,59 @@ export default function HoursReport() {
     };
   };
 
+  // Teile einen Eintrag in Vormittag/Nachmittag/Unterbrechung auf basierend auf Zeiten + has_lunch_break
+  const getEntryTimeColumns = (entry: TimeEntry) => {
+    const start = entry.start_time?.substring(0, 5) || "";
+    const end = entry.end_time?.substring(0, 5) || "";
+    const startMin = start ? timeToMinutes(start) : 0;
+    const endMin = end ? timeToMinutes(end) : 0;
+    const lunchBreak = entry.has_lunch_break ? calculateLunchBreak(entry) : null;
+    const hasBreakfast = !!entry.has_breakfast_break;
+    const breakfastPause = hasBreakfast ? `${BREAKFAST_BREAK_START} - ${BREAKFAST_BREAK_END}` : "";
+
+    if (lunchBreak) {
+      return {
+        vormittagBeginn: start,
+        vormittagEnde: lunchBreak.start,
+        vormittagspause: breakfastPause,
+        unterbrechung: `${lunchBreak.start} - ${lunchBreak.end}`,
+        nachmittagBeginn: lunchBreak.end,
+        nachmittagEnde: end,
+      };
+    }
+
+    // Kein Mittagspause - entweder reiner Vormittag, reiner Nachmittag oder durchgehend
+    const noonMin = 12 * 60;
+    if (endMin <= noonMin) {
+      return {
+        vormittagBeginn: start,
+        vormittagEnde: end,
+        vormittagspause: breakfastPause,
+        unterbrechung: "",
+        nachmittagBeginn: "",
+        nachmittagEnde: "",
+      };
+    }
+    if (startMin >= noonMin + 30) {
+      return {
+        vormittagBeginn: "",
+        vormittagEnde: "",
+        vormittagspause: breakfastPause,
+        unterbrechung: "",
+        nachmittagBeginn: start,
+        nachmittagEnde: end,
+      };
+    }
+    return {
+      vormittagBeginn: start,
+      vormittagEnde: "",
+      vormittagspause: breakfastPause,
+      unterbrechung: "",
+      nachmittagBeginn: "",
+      nachmittagEnde: end,
+    };
+  };
+
   const monthDays = generateMonthDays();
   const employeeName = selectedUserId && profiles[selectedUserId]
     ? `${profiles[selectedUserId].vorname} ${profiles[selectedUserId].nachname}`
@@ -764,35 +817,41 @@ export default function HoursReport() {
 
   const buildSummaryWorksheetRows = (includeOvertime: boolean) => {
     const breakdown = getExcelBreakdown(includeOvertime);
-    return summaryRows.map((row) => ["", "", "", "", "", row.label, breakdown[row.key].toFixed(2), row.key === "gesamtsumme" && includeOvertime ? reportMetrics.totalOvertime.toFixed(2) : "", "", "", "", ""]);
+    return summaryRows.map((row) => ["", "", "", "", "", "", row.label, breakdown[row.key].toFixed(2), row.key === "gesamtsumme" && includeOvertime ? reportMetrics.totalOvertime.toFixed(2) : "", "", "", "", ""]);
   };
 
   const buildEmployeeWorksheetData = (includeOvertime: boolean) => {
+    // Neue Spaltenstruktur (13 Spalten):
+    // 0 Datum | 1 Vormittag Beginn | 2 Vormittag Ende | 3 Vormittagspause | 4 Unterbrechung
+    // 5 Nachmittag Beginn | 6 Nachmittag Ende | 7 Stunden | 8 (Überstunden|) | 9 Ort | 10 Projekt | 11 Tätigkeit | 12 PLZ
+    const emptyRow = () => ["", "", "", "", "", "", "", "", "", "", "", "", ""];
     const worksheetData: (string | number)[][] = [
-      ["FASCHING Gebäudetechnik", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
-      ["Dienstnehmer:", "", employeeName, "", "", "", "", "", "Monat:", `${monthNamesShort[month - 1]}-${year.toString().slice(-2)}`, "", ""],
-      ["", "", "", "", "", "", "", "", "", "", "", ""],
+      ["FASCHING Gebäudetechnik", "", "", "", "", "", "", "", "", "", "", "", ""],
+      emptyRow(),
+      emptyRow(),
+      emptyRow(),
+      ["Dienstnehmer:", "", employeeName, "", "", "", "", "", "", "Monat:", `${monthNamesShort[month - 1]}-${year.toString().slice(-2)}`, "", ""],
+      emptyRow(),
     ];
 
     if (includeOvertime) {
       worksheetData.push(
-        ["Datum", "V o r m i t t a g", "", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Überstunden", "Ort", "Projekt", "Tätigkeit", "PLZ"],
-        ["", "Beginn", "Ende", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
+        ["Datum", "V o r m i t t a g", "", "Vormittagspause", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Überstunden", "Ort", "Projekt", "Tätigkeit", "PLZ"],
+        ["", "Beginn", "Ende", "von - bis", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
       );
     } else {
       worksheetData.push(
-        ["Datum", "V o r m i t t a g", "", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Ort", "Projekt", "Tätigkeit", "PLZ", ""],
-        ["", "Beginn", "Ende", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
+        ["Datum", "V o r m i t t a g", "", "Vormittagspause", "Unterbrechung", "N a c h m i t t a g", "", "Stunden", "Ort", "Projekt", "Tätigkeit", "PLZ", ""],
+        ["", "Beginn", "Ende", "von - bis", "von - bis", "Beginn", "Ende", "Gesamt", "", "", "", "", ""]
       );
     }
 
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
+    worksheetData.push(emptyRow());
 
     const prevMonthLastDay = new Date(year, month - 1, 0).getDate();
-    worksheetData.push([prevMonthLastDay, "", "", "", "", "", "", "", "", "", "", ""]);
+    const prevMonthRow = emptyRow();
+    prevMonthRow[0] = prevMonthLastDay;
+    worksheetData.push(prevMonthRow);
 
     const daysInMonth = new Date(year, month, 0).getDate();
     for (let day = 1; day <= daysInMonth; day++) {
@@ -800,12 +859,20 @@ export default function HoursReport() {
       const dayEntries = timeEntries.filter((e) => isSameDay(parseISO(e.datum), dayDate));
 
       if (dayEntries.length === 0) {
-        worksheetData.push([day, "", "", "", "", "", "", "", "", "", "", ""]);
+        const row = emptyRow();
+        row[0] = day;
+        worksheetData.push(row);
         continue;
       }
 
+      const dayTarget = getNormalWorkingHours(dayDate);
+      const dayTotalActual = dayEntries.reduce((s, e) => s + Number(e.stunden || 0), 0);
+
+      // Ohne Überstunden: Stunden pro Eintrag so kappen, dass Tagessumme = Regelarbeitszeit
+      let remainingCap = dayTarget;
+
       dayEntries.forEach((entry, entryIndex) => {
-        const lunchBreak = calculateLunchBreak(entry);
+        const cols = getEntryTimeColumns(entry);
         const project = entry.project_id ? projects[entry.project_id] : undefined;
         const isAbsence = isAbsenceType(entry.taetigkeit);
         const isRegie = entry.location_type === "regie" || entry.disturbance_id != null;
@@ -815,19 +882,20 @@ export default function HoursReport() {
         const projektName = isAbsence ? entry.taetigkeit : isRegie ? (project ? `${regieLabel} · ${project.name}` : regieLabel) : project?.name || "";
         const plz = isAbsence ? "" : isRegie ? (project?.plz || "") : entry.location_type === "baustelle" ? project?.plz || "" : "";
         const displayDay = entryIndex === 0 ? day : "";
+        const entryHours = Number(entry.stunden || 0);
 
         if (includeOvertime) {
           const isLast = entryIndex === dayEntries.length - 1;
-          const dayTotal = dayEntries.reduce((s, e) => s + Number(e.stunden || 0), 0);
-          const dayOT = isLast ? calculateOvertime(dayDate, dayTotal) : 0;
+          const dayOT = isLast ? calculateOvertime(dayDate, dayTotalActual) : 0;
           worksheetData.push([
             displayDay,
-            entry.start_time?.substring(0, 5) || "",
-            lunchBreak?.start || "",
-            entry.pause_minutes && lunchBreak ? `${lunchBreak.start} - ${lunchBreak.end}` : "",
-            lunchBreak?.end || "",
-            entry.end_time?.substring(0, 5) || "",
-            Number(entry.stunden || 0).toFixed(2),
+            cols.vormittagBeginn,
+            cols.vormittagEnde,
+            cols.vormittagspause,
+            cols.unterbrechung,
+            cols.nachmittagBeginn,
+            cols.nachmittagEnde,
+            entryHours.toFixed(2),
             isLast && dayOT !== 0 ? (dayOT > 0 ? "+" : "") + dayOT.toFixed(2) : "",
             ortText,
             projektName,
@@ -835,15 +903,17 @@ export default function HoursReport() {
             plz,
           ]);
         } else {
-          const normalHours = getNormalWorkingHours(dayDate);
+          const cappedHours = Math.max(0, Math.min(entryHours, remainingCap));
+          remainingCap -= cappedHours;
           worksheetData.push([
             displayDay,
-            normalHours > 0 ? "07:00" : "",
-            normalHours > 0 ? "12:00" : "",
-            normalHours > 0 ? "12:00 - 12:30" : "",
-            normalHours > 0 ? "12:30" : "",
-            normalHours > 0 ? "17:07:30" : "",
-            normalHours.toFixed(2),
+            cols.vormittagBeginn,
+            cols.vormittagEnde,
+            cols.vormittagspause,
+            cols.unterbrechung,
+            cols.nachmittagBeginn,
+            cols.nachmittagEnde,
+            cappedHours.toFixed(2),
             ortText,
             projektName,
             entry.taetigkeit,
@@ -854,43 +924,50 @@ export default function HoursReport() {
       });
 
       if (dayEntries.length > 1) {
-        const dayTotalHours = dayEntries.reduce((sum, e) => sum + Number(e.stunden || 0), 0);
-        const dayTotalOvertime = dayEntries.reduce((sum, e) => sum + calculateOvertime(dayDate, Number(e.stunden || 0)), 0);
-        const dayNormalHours = getNormalWorkingHours(dayDate);
-
+        const dayTotalOvertime = calculateOvertime(dayDate, dayTotalActual);
         if (includeOvertime) {
-          worksheetData.push(["", "", "", "", "", "Tagessumme:", dayTotalHours.toFixed(2), dayTotalOvertime > 0 ? dayTotalOvertime.toFixed(2) : "", "", "", "", ""]);
+          worksheetData.push(["", "", "", "", "", "", "Tagessumme:", dayTotalActual.toFixed(2), dayTotalOvertime > 0 ? dayTotalOvertime.toFixed(2) : "", "", "", "", ""]);
         } else {
-          worksheetData.push(["", "", "", "", "", "Tagessumme:", dayNormalHours.toFixed(2), "", "", "", "", ""]);
+          const dayCapped = Math.min(dayTotalActual, dayTarget);
+          worksheetData.push(["", "", "", "", "", "", "Tagessumme:", dayCapped.toFixed(2), "", "", "", "", ""]);
         }
       }
     }
 
     if (includeOvertime) {
-      worksheetData.push(["", "", "", "", "", "SUMME", reportMetrics.totalHours.toFixed(2), reportMetrics.totalOvertime.toFixed(2), "", "", "", ""]);
+      worksheetData.push(["", "", "", "", "", "", "SUMME", reportMetrics.totalHours.toFixed(2), reportMetrics.totalOvertime.toFixed(2), "", "", "", ""]);
     } else {
-      worksheetData.push(["", "", "", "", "", "SUMME", reportMetrics.noOvertime.gesamtsumme.toFixed(2), "", "", "", "", ""]);
+      worksheetData.push(["", "", "", "", "", "", "SUMME", reportMetrics.noOvertime.gesamtsumme.toFixed(2), "", "", "", "", ""]);
     }
 
     worksheetData.push(...buildSummaryWorksheetRows(includeOvertime));
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
+    worksheetData.push(emptyRow());
+    worksheetData.push(emptyRow());
+    worksheetData.push(emptyRow());
 
     if (includeOvertime) {
-      worksheetData.push(["", "Hiermit bestätige ich die Richtigkeit der von mir angegebenen Überstunden.", "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", `Derzeitiger offener Überstundenstand: ${reportMetrics.totalOvertime.toFixed(2)}`, "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", "Restliche Überstunden wurden zur Gänze abgegolten.", "", "", "", "", "", "", "", "", "", ""]);
+      const certRow = emptyRow();
+      certRow[1] = "Hiermit bestätige ich die Richtigkeit der von mir angegebenen Überstunden.";
+      worksheetData.push(certRow);
+      worksheetData.push(emptyRow());
+      const otStandRow = emptyRow();
+      otStandRow[1] = `Derzeitiger offener Überstundenstand: ${reportMetrics.totalOvertime.toFixed(2)}`;
+      worksheetData.push(otStandRow);
+      const settleRow = emptyRow();
+      settleRow[1] = "Restliche Überstunden wurden zur Gänze abgegolten.";
+      worksheetData.push(settleRow);
     } else {
-      worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-      worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
+      worksheetData.push(emptyRow());
+      worksheetData.push(emptyRow());
+      worksheetData.push(emptyRow());
+      worksheetData.push(emptyRow());
     }
 
-    worksheetData.push(["", "", "", "", "", "", "", "", "", "", "", ""]);
-    worksheetData.push(["", "Datum:", "", "", "", "Unterschrift:", "", "", "", "", "", ""]);
+    worksheetData.push(emptyRow());
+    const sigRow = emptyRow();
+    sigRow[1] = "Datum:";
+    sigRow[6] = "Unterschrift:";
+    worksheetData.push(sigRow);
 
     return worksheetData;
   };
@@ -1021,18 +1098,19 @@ export default function HoursReport() {
     const ws = XLSX.utils.aoa_to_sheet(worksheetData);
 
     ws["!cols"] = [
-      { wch: 12 },
-      { wch: 24 },
-      { wch: 24 },
-      { wch: 26 },
-      { wch: 12 },
-      { wch: 24 },
-      { wch: 12 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 22 },
-      { wch: 20 },
-      { wch: 8 },
+      { wch: 8 },   // 0 Datum
+      { wch: 10 },  // 1 Vormittag Beginn
+      { wch: 10 },  // 2 Vormittag Ende
+      { wch: 16 },  // 3 Vormittagspause
+      { wch: 16 },  // 4 Unterbrechung
+      { wch: 10 },  // 5 Nachmittag Beginn
+      { wch: 10 },  // 6 Nachmittag Ende
+      { wch: 10 },  // 7 Stunden
+      { wch: 12 },  // 8 Überstunden
+      { wch: 14 },  // 9 Ort
+      { wch: 26 },  // 10 Projekt
+      { wch: 22 },  // 11 Tätigkeit
+      { wch: 8 },   // 12 PLZ
     ];
 
     const footerRowsCount = 9;
@@ -1041,17 +1119,17 @@ export default function HoursReport() {
     const footerBaseRow = buildEmployeeWorksheetData(includeOvertime).length - footerRowsCount;
 
     ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 5 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 5 } },
-      { s: { r: 2, c: 0 }, e: { r: 2, c: 5 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: 5 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 6 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 6 } },
+      { s: { r: 2, c: 0 }, e: { r: 2, c: 6 } },
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 6 } },
       { s: { r: 4, c: 0 }, e: { r: 4, c: 1 } },
-      { s: { r: 4, c: 2 }, e: { r: 4, c: 7 } },
-      { s: { r: 4, c: 8 }, e: { r: 4, c: 8 } },
-      { s: { r: 4, c: 9 }, e: { r: 4, c: 11 } },
-      { s: { r: footerBaseRow + 3, c: 1 }, e: { r: footerBaseRow + 3, c: 10 } },
-      { s: { r: footerBaseRow + 5, c: 1 }, e: { r: footerBaseRow + 5, c: 10 } },
-      { s: { r: footerBaseRow + 6, c: 1 }, e: { r: footerBaseRow + 6, c: 10 } },
+      { s: { r: 4, c: 2 }, e: { r: 4, c: 8 } },
+      { s: { r: 4, c: 9 }, e: { r: 4, c: 9 } },
+      { s: { r: 4, c: 10 }, e: { r: 4, c: 12 } },
+      { s: { r: footerBaseRow + 3, c: 1 }, e: { r: footerBaseRow + 3, c: 11 } },
+      { s: { r: footerBaseRow + 5, c: 1 }, e: { r: footerBaseRow + 5, c: 11 } },
+      { s: { r: footerBaseRow + 6, c: 1 }, e: { r: footerBaseRow + 6, c: 11 } },
     ];
 
     ws["!rows"] = ws["!rows"] || [];
@@ -1283,7 +1361,8 @@ export default function HoursReport() {
                           <TableRow>
                             <TableHead className="w-[100px]">Datum</TableHead>
                             <TableHead>Vormittag</TableHead>
-                            <TableHead>Pause</TableHead>
+                            <TableHead>Vormittagspause</TableHead>
+                            <TableHead>Mittagspause</TableHead>
                             <TableHead>Nachmittag</TableHead>
                             <TableHead className="text-right">Stunden</TableHead>
                             <TableHead className="text-right">Überstunden</TableHead>
@@ -1296,13 +1375,13 @@ export default function HoursReport() {
                         <TableBody>
                           {loading ? (
                             <TableRow>
-                              <TableCell colSpan={isAdmin ? 10 : 9} className="text-center">
+                              <TableCell colSpan={isAdmin ? 11 : 10} className="text-center">
                                 Lade...
                               </TableCell>
                             </TableRow>
                           ) : monthDays.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={isAdmin ? 10 : 9} className="text-center">
+                              <TableCell colSpan={isAdmin ? 11 : 10} className="text-center">
                                 Keine Daten verfügbar
                               </TableCell>
                             </TableRow>
@@ -1338,13 +1417,13 @@ export default function HoursReport() {
                                         </span>
                                       </div>
                                     </TableCell>
-                                    <TableCell colSpan={isAdmin ? 9 : 8}></TableCell>
+                                    <TableCell colSpan={isAdmin ? 10 : 9}></TableCell>
                                   </TableRow>
                                 );
                               }
 
                               return dayEntries.map((entry, entryIndex) => {
-                                const lunchBreak = calculateLunchBreak(entry);
+                                const cols = getEntryTimeColumns(entry);
                                 const dayOvertime = dayDiff;
                                 const project = entry.project_id ? projects[entry.project_id] : undefined;
                                 const isRegie = entry.location_type === "regie" || entry.disturbance_id != null;
@@ -1377,23 +1456,30 @@ export default function HoursReport() {
                                       )}
                                     </TableCell>
                                     <TableCell>
-                                      <div className="flex items-center gap-1">
-                                        <span>{entry.start_time?.substring(0, 5)}</span>
-                                        <span>-</span>
-                                        <span>{lunchBreak ? lunchBreak.start : entry.end_time?.substring(0, 5)}</span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell>
-                                      {lunchBreak && entry.pause_minutes > 0 && (
-                                        <span className="text-sm">{lunchBreak.start} - {lunchBreak.end}</span>
+                                      {(cols.vormittagBeginn || cols.vormittagEnde) && (
+                                        <div className="flex items-center gap-1">
+                                          <span>{cols.vormittagBeginn || "—"}</span>
+                                          <span>-</span>
+                                          <span>{cols.vormittagEnde || "—"}</span>
+                                        </div>
                                       )}
                                     </TableCell>
                                     <TableCell>
-                                      {lunchBreak && (
+                                      {cols.vormittagspause && (
+                                        <span className="text-sm text-amber-700 dark:text-amber-400">{cols.vormittagspause}</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {cols.unterbrechung && (
+                                        <span className="text-sm">{cols.unterbrechung}</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {(cols.nachmittagBeginn || cols.nachmittagEnde) && (
                                         <div className="flex items-center gap-1">
-                                          <span>{lunchBreak.end}</span>
+                                          <span>{cols.nachmittagBeginn || "—"}</span>
                                           <span>-</span>
-                                          <span>{entry.end_time?.substring(0, 5)}</span>
+                                          <span>{cols.nachmittagEnde || "—"}</span>
                                         </div>
                                       )}
                                     </TableCell>
