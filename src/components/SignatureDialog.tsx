@@ -205,18 +205,18 @@ export const SignatureDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="max-w-2xl w-[96vw] max-h-[92dvh] p-0 gap-0 flex flex-col top-[4dvh] translate-y-0 sm:top-[50%] sm:translate-y-[-50%]">
+        <DialogHeader className="px-6 pt-6 pb-3 border-b flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2 pr-8">
             <FileText className="h-5 w-5" />
             Arbeitsbericht zur Unterschrift
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs sm:text-sm">
             Bitte lassen Sie den Kunden unterschreiben und senden Sie dann den Bericht.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <div className="space-y-6 px-6 py-4 overflow-y-auto flex-1 min-h-0">
           {/* Signature Section - TOP */}
           <Card className="border-2 border-primary/20">
             <CardHeader className="pb-3">
@@ -338,7 +338,7 @@ export const SignatureDialog = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex justify-end gap-3 pt-4 border-t">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t bg-background flex-shrink-0">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
