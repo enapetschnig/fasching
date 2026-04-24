@@ -119,19 +119,22 @@ async function generatePDF(data: ReportRequest & { technicians: string[] }, phot
   const line: [number,number,number] = [200, 200, 200];
 
   const footer = () => {
+    const centerX = pw / 2;
     doc.setDrawColor(...line);
     doc.setLineWidth(0.2);
-    doc.line(m, ph - 22, m + cw, ph - 22);
-    doc.setFontSize(6.5);
+    doc.line(m, ph - 20, m + cw, ph - 20);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
     doc.setTextColor(...label);
-    doc.text("Fasching Geb\u00e4udetechnik GmbH  \u2013  Josef Schleps-Stra\u00dfe 3b, A-2104 Spillern", m, ph - 17);
-    doc.text("T: +43 2266 21 440   \u2502   E: office@fasching-anlagen.at   \u2502   Internet: www.fasching-anlagen.at", m, ph - 12);
+    doc.text("Fasching Geb\u00e4udetechnik GmbH  \u2013  Josef Schleps-Stra\u00dfe 3b, A-2104 Spillern", centerX, ph - 14, { align: "center" });
+    doc.text("T: +43 2266 21 440   -   E: office@fasching-anlagen.at   -   Internet: www.fasching-anlagen.at", centerX, ph - 10, { align: "center" });
     const pg = (doc as any).internal.getCurrentPageInfo().pageNumber;
-    doc.text("Seite " + pg, m + cw, ph - 7, { align: "right" });
+    doc.setFontSize(6.5);
+    doc.text("Seite " + pg, m + cw, ph - 5, { align: "right" });
   };
 
   const needPage = (h: number) => {
-    if (y + h > ph - 28) { footer(); doc.addPage(); y = m; }
+    if (y + h > ph - 26) { footer(); doc.addPage(); y = m; }
   };
 
   const section = (t: string) => {
