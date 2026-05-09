@@ -29,6 +29,7 @@ type Assignment = {
   end_time: string | null;
   notizen: string | null;
   user_id: string;
+  kind: "projekt" | "regie";
   projects: { name: string } | null;
   profiles: { vorname: string; nachname: string } | null;
 };
@@ -65,9 +66,9 @@ export default function Calendar() {
     const monthEnd = format(endOfMonth(currentMonth), "yyyy-MM-dd");
 
     // Fetch assignments for the month (with profile names)
-    const { data: assignData } = await supabase
+    const { data: assignData } = await (supabase as any)
       .from("worker_assignments")
-      .select("id, datum, start_time, end_time, notizen, user_id, projects(name)")
+      .select("id, datum, start_time, end_time, notizen, user_id, kind, projects(name)")
       .gte("datum", monthStart)
       .lte("datum", monthEnd)
       .order("datum");
@@ -218,7 +219,7 @@ export default function Calendar() {
                       <div className="space-y-0.5">
                         {dayAssignments.slice(0, 3).map((a) => (
                           <div key={a.id} className="text-[10px] leading-tight truncate px-0.5 py-px rounded bg-primary/10 text-primary">
-                            {a.profiles ? `${a.profiles.vorname.charAt(0)}.` : ""} {a.projects?.name?.slice(0, 10) || "?"}
+                            {a.profiles ? `${a.profiles.vorname.charAt(0)}.` : ""} {a.kind === "regie" ? "Regie" : a.projects?.name?.slice(0, 10) || "?"}
                           </div>
                         ))}
                         {dayAssignments.length > 3 && (
@@ -255,7 +256,7 @@ export default function Calendar() {
                       <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="font-semibold text-sm">{a.projects?.name || "?"}</p>
+                          <p className="font-semibold text-sm">{a.kind === "regie" ? "Regie" : a.projects?.name || "?"}</p>
                           {(a.start_time || a.end_time) && (
                             <Badge variant="secondary" className="text-xs">
                               <Clock className="h-3 w-3 mr-1" />

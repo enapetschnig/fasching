@@ -152,7 +152,10 @@ export function calculateZaBalance(
       currentMonthZa = monthly;
       continue;
     }
-    if (monthly.complete) {
+    // Vergangene Monate: einrechnen, sobald sie zeitlich abgelaufen sind —
+    // auch wenn einzelne Werktage noch nicht erfasst sind (Saldo basiert dann
+    // auf den vorhandenen Buchungen, fehlende Tage werden separat angezeigt).
+    if (monthly.monthOver) {
       bookedEarned += monthly.earned;
       bookedUsed += monthly.used;
     }

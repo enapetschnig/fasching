@@ -3,7 +3,7 @@ import { getProjectColor } from "./scheduleUtils";
 interface Props {
   projectId?: string;
   label: string;
-  variant?: "project" | "leave" | "holiday";
+  variant?: "project" | "regie" | "leave" | "holiday";
   onClick?: () => void;
   badge?: string | number;
   colorOverride?: { bg: string; text: string; border: string };
@@ -32,6 +32,22 @@ export function GanttBar({
     return (
       <div className={`${baseClasses} bg-gray-100 text-gray-500 border border-gray-200`}>
         <span className="truncate">{label}</span>
+      </div>
+    );
+  }
+
+  if (variant === "regie") {
+    return (
+      <div
+        className={`${baseClasses} bg-orange-100 text-orange-900 border border-orange-300 ${onClick ? "cursor-pointer hover:opacity-80" : ""}`}
+        onClick={onClick}
+      >
+        <span className="truncate flex-1">{label}</span>
+        {badge != null && (
+          <span className="shrink-0 text-[10px] bg-white/60 rounded px-1">
+            {badge}
+          </span>
+        )}
       </div>
     );
   }

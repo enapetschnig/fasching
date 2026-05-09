@@ -84,10 +84,15 @@ const MyHours = () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const [zaAdj, vacAdj, allEntries] = await Promise.all([
+    const [zaAdj, vacAdj, allEntries, employee] = await Promise.all([
       supabase.from("za_adjustments").select("hours").eq("user_id", user.id),
       supabase.from("vacation_adjustments").select("days").eq("user_id", user.id),
       supabase.from("time_entries").select("datum, stunden, taetigkeit").eq("user_id", user.id),
+      supabase
+        .from("employees")
+        .select("vacation_days_per_year")
+        .eq("user_id", user.id)
+        .maybeSingle(),
     ]);
 
     const vacDates = new Set<string>();
@@ -107,8 +112,12 @@ const MyHours = () => {
       balance: balance.balance,
     });
 
-    // Urlaub
-    const granted = (vacAdj.data || []).reduce((s, r) => s + Number(r.days), 0);
+    // Urlaub: Adjustments summieren. Fallback: wenn keine Adjustments existieren,
+    // den jährlichen Anspruch (employees.vacation_days_per_year) als Guthaben heranziehen,
+    // damit ein neuer MA nicht bei 0 startet.
+    const adjGranted = (vacAdj.data || []).reduce((s, r) => s + Number(r.days), 0);
+    const yearly = Number((employee.data as any)?.vacation_days_per_year ?? 0);
+    const granted = adjGranted > 0 ? adjGranted : yearly;
     const vacUsedDays = vacDates.size;
     setVacationSaldo({ granted, used: vacUsedDays, balance: granted - vacUsedDays });
   };
@@ -426,7 +435,7 @@ const MyHours = () => {
                                 <span className="text-sm truncate max-w-[60%]">{projectName}</span>
                                 <Badge variant="outline" className="text-xs shrink-0 flex items-center gap-1">
                                   {entry.location_type === 'werkstatt' ? (
-                                    <><Hammer className="w-3 h-3" /> Werkstatt</>
+                                    <><Hammer className="w-3 h-3" /> {entry.taetigkeit?.trim() || "Sonstiges"}</>
                                   ) : entry.location_type === 'regie' ? (
                                     <><Building2 className="w-3 h-3" /> Regie</>
                                   ) : (
@@ -567,7 +576,7 @@ const MyHours = () => {
                                 {entry.location_type === 'werkstatt' ? (
                                   <>
                                     <Hammer className="w-4 h-4 text-muted-foreground" />
-                                    <span>Werkstatt</span>
+                                    <span>{entry.taetigkeit?.trim() || "Sonstiges"}</span>
                                   </>
                                 ) : entry.location_type === 'regie' ? (
                                   <>

@@ -13,6 +13,7 @@ import {
 
 import type {
   Assignment,
+  AssignmentKind,
   DailyTarget,
   ScheduleMode,
 } from "@/components/schedule/scheduleTypes";
@@ -40,6 +41,7 @@ export default function ScheduleBoard() {
     projects,
     assignments,
     setAssignments,
+    assignmentPhotos,
     resources,
     setResources,
     dailyTargets,
@@ -49,6 +51,12 @@ export default function ScheduleBoard() {
     loading,
     fetchData,
   } = useScheduleData();
+
+  // Fotos pro Assignment-ID zählen → für den kleinen Indicator in der Gantt-Bar
+  const photoCounts: Record<string, number> = {};
+  for (const p of assignmentPhotos) {
+    photoCounts[p.assignment_id] = (photoCounts[p.assignment_id] || 0) + 1;
+  }
 
   const {
     userId,
@@ -100,60 +108,36 @@ export default function ScheduleBoard() {
   // -> UPDATE; sonst -> INSERT (mehrere Einträge pro Tag/MA möglich).
   // additionalUserIds: dieselbe Zuweisung wird auch für diese MAs angelegt.
   const handleAssign = async (
-    uid: string,
-    date: Date,
-    projectId: string,
+    _uid: string,
+    _date: Date,
+    kind: AssignmentKind,
+    projectId: string | null,
     notizen?: string,
     startTime?: string,
     endTime?: string,
-    assignmentId?: string,
-    additionalUserIds: string[] = []
+    assignmentId?: string
   ) => {
-    const datum = format(date, "yyyy-MM-dd");
     const payload = {
-      project_id: projectId,
+      kind,
+      project_id: kind === "regie" ? null : projectId,
       notizen: notizen ?? null,
       start_time: startTime || "07:00",
       end_time: endTime || "16:00",
     };
 
-    if (assignmentId) {
-      const { error } = await (supabase as any)
-        .from("worker_assignments")
-        .update(payload)
-        .eq("id", assignmentId);
-      if (error) {
-        toast({ variant: "destructive", title: "Fehler", description: error.message });
-        return;
-      }
-      setAssignments((prev) =>
-        prev.map((a) => (a.id === assignmentId ? { ...a, ...payload } : a))
-      );
-      return;
-    }
+    if (!assignmentId) return;
 
-    const userIds = [uid, ...additionalUserIds.filter((u) => u && u !== uid)];
-    const rows = userIds.map((u) => ({ user_id: u, datum, created_by: userId, ...payload }));
-    const { data, error } = await (supabase as any)
+    const { error } = await (supabase as any)
       .from("worker_assignments")
-      .insert(rows)
-      .select();
-
+      .update(payload)
+      .eq("id", assignmentId);
     if (error) {
-      // Bei Konflikt (gleicher User+Projekt+Datum+StartTime) Hinweis ausgeben
-      const isConflict = String(error.code) === "23505" || /unique/i.test(error.message || "");
-      toast({
-        variant: "destructive",
-        title: isConflict ? "Bereits zugewiesen" : "Fehler",
-        description: isConflict
-          ? "Diese Kombination aus Mitarbeiter, Projekt, Tag und Startzeit existiert bereits."
-          : error.message,
-      });
+      toast({ variant: "destructive", title: "Fehler", description: error.message });
       return;
     }
-    if (data) {
-      setAssignments((prev) => [...prev, ...(data as Assignment[])]);
-    }
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === assignmentId ? { ...a, ...payload } : a))
+    );
   };
 
   // Batch-Insert: alle Kombinationen aus uids × dates × blocks anlegen.
@@ -161,8 +145,14 @@ export default function ScheduleBoard() {
   const handleAssignBatch = async (
     uids: string[],
     dates: Date[],
-    blocks: Array<{ projectId: string; startTime: string; endTime: string; notizen: string }>
-  ) => {
+    blocks: Array<{
+      kind: AssignmentKind;
+      projectId: string | null;
+      startTime: string;
+      endTime: string;
+      notizen: string;
+    }>
+  ): Promise<string[]> => {
     const rows: Array<Record<string, unknown>> = [];
     const isMultiDay = dates.length > 1;
     for (const uid of uids) {
@@ -173,12 +163,13 @@ export default function ScheduleBoard() {
         }
         const datum = format(d, "yyyy-MM-dd");
         for (const b of blocks) {
-          if (!b.projectId) continue;
+          if (b.kind === "projekt" && !b.projectId) continue;
           rows.push({
             user_id: uid,
             datum,
             created_by: userId,
-            project_id: b.projectId,
+            kind: b.kind,
+            project_id: b.kind === "regie" ? null : b.projectId,
             start_time: b.startTime || "07:00",
             end_time: b.endTime || "16:00",
             notizen: b.notizen?.trim() || null,
@@ -187,8 +178,8 @@ export default function ScheduleBoard() {
       }
     }
     if (rows.length === 0) {
-      toast({ variant: "destructive", title: "Nichts zu speichern", description: "Bitte mindestens ein Projekt wählen." });
-      return;
+      toast({ variant: "destructive", title: "Nichts zu speichern", description: "Bitte mindestens ein Projekt oder Regie wählen." });
+      return [];
     }
     const { data, error } = await (supabase as any)
       .from("worker_assignments")
@@ -203,12 +194,12 @@ export default function ScheduleBoard() {
           ? "Mindestens eine Kombination existiert bereits."
           : error.message,
       });
-      return;
+      return [];
     }
-    if (data) {
-      setAssignments((prev) => [...prev, ...(data as Assignment[])]);
-      toast({ title: "Zuweisungen gespeichert", description: `${rows.length} Einteilung(en) angelegt.` });
-    }
+    if (!data) return [];
+    setAssignments((prev) => [...prev, ...(data as Assignment[])]);
+    toast({ title: "Zuweisungen gespeichert", description: `${rows.length} Einteilung(en) angelegt.` });
+    return (data as Assignment[]).map((a) => a.id);
   };
 
   const handleRemove = async (_uid: string, _date: Date, assignmentId?: string) => {
@@ -509,6 +500,7 @@ export default function ScheduleBoard() {
                 holidays={companyHolidays}
                 days={weekDays}
                 canEditProject={(pid) => canEditProject(pid, assignments)}
+                photoCounts={photoCounts}
                 onCellClick={
                   isAdmin || isVorarbeiter ? handleCellClick : undefined
                 }
@@ -543,10 +535,7 @@ export default function ScheduleBoard() {
         projects={projects}
         profiles={profiles}
         initialAdditionalUserIds={initialAdditionalUserIds}
-        onAssign={async (uid, date, projectId, notizen, startTime, endTime, assignmentId) => {
-          // Edit-Pfad: Single Update
-          await handleAssign(uid, date, projectId, notizen, startTime, endTime, assignmentId);
-        }}
+        onAssign={handleAssign}
         onAssignBatch={handleAssignBatch}
         onRemove={handleRemove}
       />

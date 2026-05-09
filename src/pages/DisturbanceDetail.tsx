@@ -29,6 +29,7 @@ type Disturbance = {
   kunde_adresse: string | null;
   kunde_telefon: string | null;
   beschreibung: string;
+  material_text: string | null;
   notizen: string | null;
   status: string;
   is_verrechnet: boolean;
@@ -579,10 +580,26 @@ const DisturbanceDetail = () => {
           canEdit={canEdit || false}
         />
 
-        {/* Materials Section */}
-        <DisturbanceMaterials 
-          disturbanceId={disturbance.id} 
+        {/* Material Text (neues Freitext-Feld) */}
+        {disturbance.material_text?.trim() && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Verwendetes Material
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="whitespace-pre-wrap">{disturbance.material_text}</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Materials Section (Legacy-Tabelle) */}
+        <DisturbanceMaterials
+          disturbanceId={disturbance.id}
           canEdit={canEdit || false}
+          hideWhenEmpty={!!disturbance.material_text?.trim()}
         />
 
         {/* Metadata */}

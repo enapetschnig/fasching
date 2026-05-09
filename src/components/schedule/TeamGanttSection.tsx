@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { ChevronDown, ChevronRight, Users, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Users, Plus, Image as ImageIcon } from "lucide-react";
 import { GanttBar } from "./GanttBar";
 import {
   getAssignmentsForDay,
@@ -26,9 +26,12 @@ interface Props {
   onCellClick?: (userId: string, date: Date) => void;
   onRangeSelect?: (userIds: string[], days: Date[]) => void;
   onAssignmentClick?: (assignment: Assignment) => void;
+  photoCounts?: Record<string, number>;
 }
 
 type DragPoint = { userIdx: number; dayIdx: number };
+
+const DRAG_THRESHOLD_PX = 6;
 
 export function TeamGanttSection({
   profiles,
@@ -41,36 +44,83 @@ export function TeamGanttSection({
   onCellClick,
   onRangeSelect,
   onAssignmentClick,
+  photoCounts = {},
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [dragStart, setDragStart] = useState<DragPoint | null>(null);
   const [dragEnd, setDragEnd] = useState<DragPoint | null>(null);
+  const dragActiveRef = useRef(false);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
 
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p.name]));
   const editorMode = !!(onCellClick || onRangeSelect);
 
-  useEffect(() => {
-    const onMouseUp = () => {
-      if (dragStart && dragEnd) {
-        const userLo = Math.min(dragStart.userIdx, dragEnd.userIdx);
-        const userHi = Math.max(dragStart.userIdx, dragEnd.userIdx);
-        const dayLo = Math.min(dragStart.dayIdx, dragEnd.dayIdx);
-        const dayHi = Math.max(dragStart.dayIdx, dragEnd.dayIdx);
-        const selectedUsers = profiles.slice(userLo, userHi + 1).map((p) => p.id);
-        const selectedDays = days.slice(dayLo, dayHi + 1);
-
-        if (selectedUsers.length === 1 && selectedDays.length === 1 && onCellClick) {
-          onCellClick(selectedUsers[0], selectedDays[0]);
-        } else if (onRangeSelect) {
-          onRangeSelect(selectedUsers, selectedDays);
+  const finishDrag = () => {
+    setDragStart((curStart) => {
+      setDragEnd((curEnd) => {
+        if (curStart && curEnd) {
+          const userLo = Math.min(curStart.userIdx, curEnd.userIdx);
+          const userHi = Math.max(curStart.userIdx, curEnd.userIdx);
+          const dayLo = Math.min(curStart.dayIdx, curEnd.dayIdx);
+          const dayHi = Math.max(curStart.dayIdx, curEnd.dayIdx);
+          const selectedUsers = profiles.slice(userLo, userHi + 1).map((p) => p.id);
+          const selectedDays = days.slice(dayLo, dayHi + 1);
+          if (selectedUsers.length === 1 && selectedDays.length === 1 && onCellClick) {
+            onCellClick(selectedUsers[0], selectedDays[0]);
+          } else if (onRangeSelect) {
+            onRangeSelect(selectedUsers, selectedDays);
+          }
         }
+        return null;
+      });
+      return null;
+    });
+    dragActiveRef.current = false;
+    pointerStartRef.current = null;
+    pointerIdRef.current = null;
+  };
+
+  // Globale pointermove/pointerup-Listener: damit der Drag auch dann
+  // weiterläuft, wenn der Finger eine Zelle verlässt oder den Container.
+  useEffect(() => {
+    if (!dragStart) return;
+
+    const onMove = (e: PointerEvent) => {
+      // Aktivierungs-Schwelle: erst nach >6px Bewegung als "Drag" werten
+      if (!dragActiveRef.current && pointerStartRef.current) {
+        const dx = e.clientX - pointerStartRef.current.x;
+        const dy = e.clientY - pointerStartRef.current.y;
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        dragActiveRef.current = true;
       }
-      setDragStart(null);
-      setDragEnd(null);
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      const cell = target?.closest("[data-cell-user]") as HTMLElement | null;
+      if (!cell) return;
+      const userIdx = Number(cell.dataset.cellUser);
+      const dayIdx = Number(cell.dataset.cellDay);
+      if (Number.isNaN(userIdx) || Number.isNaN(dayIdx)) return;
+      setDragEnd((prev) =>
+        !prev || prev.userIdx !== userIdx || prev.dayIdx !== dayIdx
+          ? { userIdx, dayIdx }
+          : prev
+      );
+      // verhindert vertikales/horizontales Scrollen während aktivem Drag
+      if (dragActiveRef.current && e.cancelable) e.preventDefault();
     };
-    window.addEventListener("mouseup", onMouseUp);
-    return () => window.removeEventListener("mouseup", onMouseUp);
-  }, [dragStart, dragEnd, days, profiles, onCellClick, onRangeSelect]);
+
+    const onUp = () => finishDrag();
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragStart, profiles, days, onCellClick, onRangeSelect]);
 
   const isInDragRect = (userIdx: number, dayIdx: number) => {
     if (!dragStart || !dragEnd) return false;
@@ -133,6 +183,8 @@ export function TeamGanttSection({
                 return (
                   <div
                     key={day.toISOString()}
+                    data-cell-user={userIdx}
+                    data-cell-day={dayIdx}
                     className={`group p-0.5 border-r min-h-[40px] select-none ${
                       holiday ? "bg-gray-100" : ""
                     } ${
@@ -140,16 +192,18 @@ export function TeamGanttSection({
                         ? "bg-blue-100 ring-1 ring-inset ring-blue-400"
                         : ""
                     }`}
-                    onMouseDown={(e) => {
-                      if ((e.target as HTMLElement).closest("[data-assignment-id]")) return;
-                      if ((e.target as HTMLElement).closest("[data-add-button]")) return;
-                      if (canAddHere) {
-                        setDragStart({ userIdx, dayIdx });
-                        setDragEnd({ userIdx, dayIdx });
-                      }
-                    }}
-                    onMouseEnter={() => {
-                      if (dragStart) setDragEnd({ userIdx, dayIdx });
+                    style={{ touchAction: canAddHere ? "pan-y" : undefined }}
+                    onPointerDown={(e) => {
+                      if (e.button !== undefined && e.button !== 0) return;
+                      const target = e.target as HTMLElement;
+                      if (target.closest("[data-assignment-id]")) return;
+                      if (target.closest("[data-add-button]")) return;
+                      if (!canAddHere) return;
+                      pointerIdRef.current = e.pointerId;
+                      pointerStartRef.current = { x: e.clientX, y: e.clientY };
+                      dragActiveRef.current = false;
+                      setDragStart({ userIdx, dayIdx });
+                      setDragEnd({ userIdx, dayIdx });
                     }}
                   >
                     {holiday ? (
@@ -173,27 +227,39 @@ export function TeamGanttSection({
                     ) : dayAssignments.length > 0 ? (
                       <div className="flex flex-col gap-0.5">
                         {dayAssignments.map((a) => {
-                          const isEditable = canEditProject(a.project_id);
-                          const projectName = projectMap[a.project_id] || "–";
+                          const isRegie = a.kind === "regie";
+                          const isEditable =
+                            isRegie || canEditProject(a.project_id || "");
+                          const projectName = isRegie
+                            ? "Regie"
+                            : projectMap[a.project_id || ""] || "–";
                           const timeLabel = a.start_time && a.end_time
                             ? ` ${a.start_time.slice(0, 5)}–${a.end_time.slice(0, 5)}`
                             : "";
+                          const photoCount = photoCounts[a.id] || 0;
                           return (
                             <div
                               key={a.id}
                               data-assignment-id={a.id}
-                              className={`${onAssignmentClick && isEditable ? "cursor-pointer" : ""} ${!isEditable ? "opacity-60" : ""}`}
+                              className={`relative ${onAssignmentClick && isEditable ? "cursor-pointer" : ""} ${!isEditable ? "opacity-60" : ""}`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (onAssignmentClick && isEditable) onAssignmentClick(a);
                               }}
-                              title={`${projectName}${timeLabel}${a.notizen ? ` · ${a.notizen}` : ""}`}
+                              title={`${projectName}${timeLabel}${a.notizen ? ` · ${a.notizen}` : ""}${photoCount > 0 ? ` · ${photoCount} Foto(s)` : ""}`}
                             >
                               <GanttBar
-                                projectId={a.project_id}
+                                projectId={a.project_id || undefined}
                                 label={`${projectName}${timeLabel}`}
                                 colorOverride={empColor}
+                                variant={isRegie ? "regie" : "project"}
                               />
+                              {photoCount > 0 && (
+                                <span className="absolute right-1 top-1 inline-flex items-center gap-0.5 rounded bg-white/80 px-1 text-[9px] font-medium text-foreground shadow-sm">
+                                  <ImageIcon className="h-2.5 w-2.5" />
+                                  {photoCount}
+                                </span>
+                              )}
                             </div>
                           );
                         })}

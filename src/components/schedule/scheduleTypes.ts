@@ -1,14 +1,24 @@
 export type Profile = { id: string; vorname: string; nachname: string };
 export type Project = { id: string; name: string };
 
+export type AssignmentKind = "projekt" | "regie";
+
 export type Assignment = {
   id: string;
   user_id: string;
-  project_id: string;
+  project_id: string | null;
   datum: string;
   notizen: string | null;
   start_time: string | null;
   end_time: string | null;
+  kind: AssignmentKind;
+};
+
+export type AssignmentPhoto = {
+  id: string;
+  assignment_id: string;
+  file_path: string;
+  file_name: string;
 };
 
 export type Resource = {

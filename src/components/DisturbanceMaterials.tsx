@@ -24,9 +24,10 @@ type Material = {
 type DisturbanceMaterialsProps = {
   disturbanceId: string;
   canEdit: boolean;
+  hideWhenEmpty?: boolean;
 };
 
-export const DisturbanceMaterials = ({ disturbanceId, canEdit }: DisturbanceMaterialsProps) => {
+export const DisturbanceMaterials = ({ disturbanceId, canEdit, hideWhenEmpty = false }: DisturbanceMaterialsProps) => {
   const { toast } = useToast();
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,6 +158,10 @@ export const DisturbanceMaterials = ({ disturbanceId, canEdit }: DisturbanceMate
 
     setDeleting(null);
   };
+
+  if (hideWhenEmpty && !canEdit && !loading && materials.length === 0) {
+    return null;
+  }
 
   return (
     <>

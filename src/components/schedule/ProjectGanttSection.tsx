@@ -29,8 +29,14 @@ export function ProjectGanttSection({
     return p ? `${p.vorname} ${p.nachname.charAt(0)}.` : "?";
   };
 
-  // Only show projects that have assignments this period
-  const activeProjectIds = [...new Set(assignments.map((a) => a.project_id))];
+  // Only show projects that have assignments this period (Regie ohne project_id wird hier ignoriert)
+  const activeProjectIds = [
+    ...new Set(
+      assignments
+        .filter((a) => a.kind !== "regie" && a.project_id)
+        .map((a) => a.project_id as string)
+    ),
+  ];
   const activeProjects = projects.filter((p) =>
     activeProjectIds.includes(p.id)
   );

@@ -70,9 +70,13 @@ export function YearPlanningView({
     return groups;
   }, [weeks]);
 
-  // Active projects (those with assignments this year)
+  // Active projects (those with assignments this year — Regie ohne project_id ignorieren)
   const activeProjectIds = [
-    ...new Set(assignments.map((a) => a.project_id)),
+    ...new Set(
+      assignments
+        .filter((a) => a.kind !== "regie" && a.project_id)
+        .map((a) => a.project_id as string)
+    ),
   ];
   const activeProjects = projects.filter((p) =>
     activeProjectIds.includes(p.id)

@@ -823,6 +823,13 @@ const TimeTracking = () => {
         return;
       }
 
+      if (block.locationType === "werkstatt" && !block.taetigkeit?.trim()) {
+        toast({ variant: "destructive", title: "Tätigkeit fehlt", description: `Block ${blockNum}: Bitte Tätigkeit eingeben (Pflicht bei Sonstiges)` });
+        submitLock.current = false;
+        setSaving(false);
+        return;
+      }
+
       if (blockHours <= 0) {
         toast({ variant: "destructive", title: "Fehler", description: `Block ${blockNum}: Keine gültigen Arbeitsstunden` });
         submitLock.current = false;
@@ -1088,7 +1095,7 @@ const TimeTracking = () => {
                             </div>
                             <div>
                               <RadioGroupItem value="werkstatt" id={`werkstatt-${block.id}`} className="peer sr-only" />
-                              <Label htmlFor={`werkstatt-${block.id}`} className="flex h-12 cursor-pointer items-center justify-center rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent peer-data-[state=checked]:border-primary text-sm">Werkstatt</Label>
+                              <Label htmlFor={`werkstatt-${block.id}`} className="flex h-12 cursor-pointer items-center justify-center rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent peer-data-[state=checked]:border-primary text-sm">Sonstiges</Label>
                             </div>
                           </RadioGroup>
                         </div>
@@ -1154,8 +1161,24 @@ const TimeTracking = () => {
 
                         {/* Tätigkeit */}
                         <div className="space-y-2">
-                          <Label>Tätigkeit <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                          <Input value={block.taetigkeit} onChange={(e) => updateBlock(block.id, { taetigkeit: e.target.value })} placeholder="z.B. Heizungsmontage, Sanitärarbeiten..." />
+                          <Label>
+                            Tätigkeit{" "}
+                            {block.locationType === "werkstatt" ? (
+                              <span className="text-destructive font-normal">*</span>
+                            ) : (
+                              <span className="text-muted-foreground font-normal">(optional)</span>
+                            )}
+                          </Label>
+                          <Input
+                            value={block.taetigkeit}
+                            onChange={(e) => updateBlock(block.id, { taetigkeit: e.target.value })}
+                            placeholder={
+                              block.locationType === "werkstatt"
+                                ? "z.B. Werkstatt, Lager, Materialbeschaffung, Schulung…"
+                                : "z.B. Heizungsmontage, Sanitärarbeiten…"
+                            }
+                            required={block.locationType === "werkstatt"}
+                          />
                         </div>
 
                         {/* Von - Bis Zeiten */}

@@ -5,6 +5,7 @@ import type {
   Profile,
   Project,
   Assignment,
+  AssignmentPhoto,
   Resource,
   DailyTarget,
   LeaveRequest,
@@ -16,6 +17,7 @@ export function useScheduleData() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignmentPhotos, setAssignmentPhotos] = useState<AssignmentPhoto[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
   const [dailyTargets, setDailyTargets] = useState<DailyTarget[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -59,9 +61,9 @@ export function useScheduleData() {
           .select("id, name")
           .eq("status", "aktiv")
           .order("name"),
-        supabase
+        (supabase as any)
           .from("worker_assignments")
-          .select("id, user_id, project_id, datum, notizen")
+          .select("id, user_id, project_id, datum, notizen, start_time, end_time, kind")
           .gte("datum", fromDate)
           .lte("datum", toDate),
         supabase
@@ -93,6 +95,20 @@ export function useScheduleData() {
       if (leave) setLeaveRequests(leave as LeaveRequest[]);
       if (holidays) setCompanyHolidays(holidays as CompanyHoliday[]);
 
+      // Fotos für die geladenen Assignments holen (separater Call,
+      // weil RLS-Filter sonst zur tieferen Ableitung fließen würden).
+      const assignmentIds = ((assigns || []) as Assignment[]).map((a) => a.id);
+      if (assignmentIds.length > 0) {
+        const { data: photos } = await (supabase as any)
+          .from("worker_assignment_photos")
+          .select("id, assignment_id, file_path, file_name")
+          .in("assignment_id", assignmentIds);
+        if (photos) setAssignmentPhotos(photos as AssignmentPhoto[]);
+        else setAssignmentPhotos([]);
+      } else {
+        setAssignmentPhotos([]);
+      }
+
       setLoading(false);
     },
     []
@@ -103,6 +119,8 @@ export function useScheduleData() {
     projects,
     assignments,
     setAssignments,
+    assignmentPhotos,
+    setAssignmentPhotos,
     resources,
     setResources,
     dailyTargets,
