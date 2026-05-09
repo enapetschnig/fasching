@@ -52,8 +52,9 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
   const [activeAssignment, setActiveAssignment] = useState<WeekAssignment | null>(null);
 
   const weekStart = startOfISOWeek(new Date());
-  const weekEnd = addDays(weekStart, 4);
-  const weekDays = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  // Range bis Sonntag laden — Sa/So werden im Render nur dann gezeigt,
+  // wenn dort tatsächlich Einteilungen existieren.
+  const weekEnd = addDays(weekStart, 6);
 
   useEffect(() => {
     const fetch = async () => {
@@ -148,6 +149,18 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
     leaves.length > 0;
   if (!hasAnyData) return null;
 
+  // Mo-Fr immer rendern; Sa/So nur wenn dort Daten liegen
+  const baseDays = Array.from({ length: 5 }, (_, i) => addDays(weekStart, i));
+  const sat = addDays(weekStart, 5);
+  const sun = addDays(weekStart, 6);
+  const hasSatData = !!assignmentsByDay[format(sat, "yyyy-MM-dd")]?.length;
+  const hasSunData = !!assignmentsByDay[format(sun, "yyyy-MM-dd")]?.length;
+  const weekDays = [
+    ...baseDays,
+    ...(hasSatData ? [sat] : []),
+    ...(hasSunData ? [sun] : []),
+  ];
+
   const photoUrl = (filePath: string) =>
     supabase.storage.from("assignment-photos").getPublicUrl(filePath).data.publicUrl;
 
@@ -164,7 +177,10 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
       </h2>
       <Card>
         <CardContent className="p-3">
-          <div className="grid grid-cols-5 gap-1.5">
+          <div
+            className="grid gap-1.5"
+            style={{ gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))` }}
+          >
             {weekDays.map((day) => {
               const datum = format(day, "yyyy-MM-dd");
               const dayAssigns = assignmentsByDay[datum] || [];
