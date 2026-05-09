@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Clock, FolderKanban, Users, BarChart3, LogOut, FileText, Camera, ArrowRight, Info, User as UserIcon, Zap, CalendarDays, MapPin, StickyNote } from "lucide-react";
+import { Clock, FolderKanban, Users, BarChart3, LogOut, FileText, Camera, ArrowRight, Info, User as UserIcon, Zap, CalendarDays, MapPin, StickyNote, Wrench, Image as ImageIcon, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useOnboarding } from "@/contexts/OnboardingContext";
 import {
@@ -50,6 +51,7 @@ export default function Index() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [recentEntries, setRecentEntries] = useState<RecentTimeEntry[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [photoLightbox, setPhotoLightbox] = useState<{ assignment: any | null; open: boolean }>({ assignment: null, open: false });
   const [loading, setLoading] = useState(true);
   const [isActivated, setIsActivated] = useState<boolean | null>(null);
   const { handleRestartInstallGuide } = useOnboarding();
@@ -115,27 +117,48 @@ export default function Index() {
 
   const fetchAssignments = async (userId: string) => {
     const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
-    // Also fetch tomorrow
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-    // And day after
+    // Range: gestern bis übermorgen — so erscheint die letzte Einteilung
+    // auch noch am Folgetag (z.B. Freitags-Einsatz auf Samstag-Dashboard).
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split("T")[0];
     const dayAfter = new Date(today);
     dayAfter.setDate(dayAfter.getDate() + 2);
     const dayAfterStr = dayAfter.toISOString().split("T")[0];
 
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from("worker_assignments")
-      .select("id, datum, notizen, start_time, end_time, project_id, projects(name)")
+      .select("id, datum, notizen, start_time, end_time, project_id, kind, title, projects(name)")
       .eq("user_id", userId)
-      .gte("datum", todayStr)
+      .gte("datum", yesterdayStr)
       .lte("datum", dayAfterStr)
       .order("datum", { ascending: true });
 
-    if (data) {
-      setAssignments(data as any);
+    if (!data) {
+      setAssignments([]);
+      return;
     }
+
+    // Fotos pro Assignment laden
+    const ids = (data as any[]).map((a) => a.id);
+    let photosByAssignment: Record<string, Array<{ id: string; file_path: string; file_name: string }>> = {};
+    if (ids.length > 0) {
+      const { data: photos } = await (supabase as any)
+        .from("worker_assignment_photos")
+        .select("id, assignment_id, file_path, file_name")
+        .in("assignment_id", ids);
+      for (const p of (photos as any[]) || []) {
+        (photosByAssignment[p.assignment_id] ||= []).push({
+          id: p.id,
+          file_path: p.file_path,
+          file_name: p.file_name,
+        });
+      }
+    }
+
+    setAssignments(
+      (data as any[]).map((a) => ({ ...a, photos: photosByAssignment[a.id] || [] }))
+    );
   };
 
   const loadForUser = async (userId: string) => {
@@ -353,10 +376,21 @@ export default function Index() {
                   grouped[a.datum].push(a);
                 });
 
+                const yesterdayDate = new Date();
+                yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                const yesterdayStr = yesterdayDate.toISOString().split("T")[0];
+
                 return Object.entries(grouped).map(([datum, entries]) => {
                   const isToday = datum === today;
                   const isTomorrow = datum === tomorrowStr;
-                  const label = isToday ? "Heute" : isTomorrow ? "Morgen" : new Date(datum).toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" });
+                  const isYesterday = datum === yesterdayStr;
+                  const label = isToday
+                    ? "Heute"
+                    : isTomorrow
+                    ? "Morgen"
+                    : isYesterday
+                    ? "Gestern"
+                    : new Date(datum).toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" });
                   // nach Startzeit sortieren, dann zeigt der Tag den chronologischen Ablauf
                   const sortedEntries = [...entries].sort((a: any, b: any) =>
                     (a.start_time || "").localeCompare(b.start_time || "")
@@ -364,7 +398,7 @@ export default function Index() {
                   const hasMultiple = sortedEntries.length > 1;
 
                   return (
-                    <Card key={datum} className={isToday ? "border-primary/50 bg-primary/5" : hasMultiple ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-900/10" : ""}>
+                    <Card key={datum} className={isToday ? "border-primary/50 bg-primary/5" : hasMultiple ? "border-amber-400/60 bg-amber-50/40 dark:bg-amber-900/10" : isYesterday ? "opacity-80" : ""}>
                       <CardContent className="p-3 sm:p-4">
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <span className={`text-sm font-bold ${isToday ? "text-primary" : "text-muted-foreground"}`}>
@@ -381,37 +415,78 @@ export default function Index() {
                             </span>
                           )}
                         </div>
-                        <div className="space-y-2">
-                          {sortedEntries.map((a: any, idx: number) => (
-                            <div
-                              key={a.id}
-                              className={`flex items-start gap-2 ${hasMultiple && idx > 0 ? "border-t pt-2" : ""}`}
-                            >
-                              {hasMultiple ? (
-                                <span className="inline-flex items-center justify-center h-5 min-w-5 rounded-full bg-amber-500 text-white text-xs font-bold shrink-0 mt-0.5 px-1.5">
-                                  {idx + 1}
-                                </span>
-                              ) : (
-                                <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="font-semibold text-base">{a.projects?.name || "Unbekanntes Projekt"}</p>
-                                  {(a.start_time || a.end_time) && (
-                                    <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
-                                      {a.start_time?.slice(0, 5) || "?"} – {a.end_time?.slice(0, 5) || "?"}
-                                    </span>
-                                  )}
-                                </div>
-                                {a.notizen && (
-                                  <div className="flex items-start gap-1 mt-0.5">
-                                    <StickyNote className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                                    <p className="text-sm text-muted-foreground">{a.notizen}</p>
-                                  </div>
+                        <div className="space-y-3">
+                          {sortedEntries.map((a: any, idx: number) => {
+                            const isRegie = a.kind === "regie";
+                            const labelText = isRegie
+                              ? a.title?.trim() || "Regie"
+                              : a.projects?.name || "Unbekanntes Projekt";
+                            const photos: Array<{ id: string; file_path: string; file_name: string }> = a.photos || [];
+                            const firstPhoto = photos[0];
+                            const extraPhotos = Math.max(0, photos.length - 1);
+                            return (
+                              <div
+                                key={a.id}
+                                className={`${hasMultiple && idx > 0 ? "border-t pt-3" : ""}`}
+                              >
+                                {firstPhoto && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPhotoLightbox({ assignment: a, open: true })}
+                                    className="relative block w-full max-w-md rounded-md overflow-hidden border bg-muted/30 mb-2 aspect-[16/9]"
+                                    title={`${photos.length} Foto(s) ansehen`}
+                                  >
+                                    <img
+                                      src={supabase.storage.from("assignment-photos").getPublicUrl(firstPhoto.file_path).data.publicUrl}
+                                      alt={firstPhoto.file_name}
+                                      className="w-full h-full object-cover"
+                                      loading="lazy"
+                                    />
+                                    {extraPhotos > 0 && (
+                                      <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded bg-black/65 px-2 py-1 text-xs font-semibold text-white">
+                                        <ImageIcon className="h-3 w-3" />
+                                        +{extraPhotos}
+                                      </span>
+                                    )}
+                                  </button>
                                 )}
+                                <div className="flex items-start gap-2">
+                                  {hasMultiple ? (
+                                    <span className="inline-flex items-center justify-center h-5 min-w-5 rounded-full bg-amber-500 text-white text-xs font-bold shrink-0 mt-0.5 px-1.5">
+                                      {idx + 1}
+                                    </span>
+                                  ) : isRegie ? (
+                                    <Wrench className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
+                                  ) : (
+                                    <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <p className={`font-semibold text-base ${isRegie ? "text-orange-900" : ""}`}>
+                                        {labelText}
+                                      </p>
+                                      {isRegie && (
+                                        <span className="text-[10px] uppercase font-semibold bg-orange-100 text-orange-900 border border-orange-300 px-1.5 py-0.5 rounded">
+                                          Regie
+                                        </span>
+                                      )}
+                                      {(a.start_time || a.end_time) && (
+                                        <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
+                                          {a.start_time?.slice(0, 5) || "?"} – {a.end_time?.slice(0, 5) || "?"}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {a.notizen && (
+                                      <div className="flex items-start gap-1 mt-0.5">
+                                        <StickyNote className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                                        <p className="text-sm text-muted-foreground">{a.notizen}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </CardContent>
                     </Card>
@@ -691,6 +766,55 @@ export default function Index() {
           <p>FASCHING Gebäudetechnik</p>
         </div>
       </main>
+
+      {/* Foto-Lightbox für Einteilungen */}
+      <Dialog
+        open={photoLightbox.open}
+        onOpenChange={(open) => setPhotoLightbox((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <ImageIcon className="h-4 w-4" />
+              Fotos – {photoLightbox.assignment?.kind === "regie"
+                ? (photoLightbox.assignment?.title?.trim() || "Regie")
+                : photoLightbox.assignment?.projects?.name || "Einteilung"}
+              {photoLightbox.assignment?.start_time && photoLightbox.assignment?.end_time && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {photoLightbox.assignment.start_time.slice(0, 5)}–{photoLightbox.assignment.end_time.slice(0, 5)}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {photoLightbox.assignment?.notizen && (
+            <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+              {photoLightbox.assignment.notizen}
+            </p>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {(photoLightbox.assignment?.photos || []).map((p: any) => (
+              <a
+                key={p.id}
+                href={supabase.storage.from("assignment-photos").getPublicUrl(p.file_path).data.publicUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block aspect-square rounded-md overflow-hidden border hover:opacity-90"
+              >
+                <img
+                  src={supabase.storage.from("assignment-photos").getPublicUrl(p.file_path).data.publicUrl}
+                  alt={p.file_name}
+                  className="w-full h-full object-cover"
+                />
+              </a>
+            ))}
+          </div>
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={() => setPhotoLightbox({ assignment: null, open: false })}>
+              <X className="h-3.5 w-3.5 mr-1" /> Schließen
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
