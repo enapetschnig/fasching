@@ -12,6 +12,7 @@ export type Assignment = {
   start_time: string | null;
   end_time: string | null;
   kind: AssignmentKind;
+  title: string | null;
 };
 
 export type AssignmentPhoto = {

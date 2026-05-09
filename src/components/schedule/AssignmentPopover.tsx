@@ -29,6 +29,7 @@ type Block = {
   id: string;
   kind: AssignmentKind;
   projectId: string;
+  title: string;
   startTime: string;
   endTime: string;
   notizen: string;
@@ -37,6 +38,7 @@ type Block = {
 export type BatchBlock = {
   kind: AssignmentKind;
   projectId: string | null;
+  title: string | null;
   startTime: string;
   endTime: string;
   notizen: string;
@@ -64,6 +66,7 @@ interface Props {
     date: Date,
     kind: AssignmentKind,
     projectId: string | null,
+    title: string | null,
     notizen?: string,
     startTime?: string,
     endTime?: string,
@@ -82,6 +85,7 @@ const newBlock = (): Block => ({
   id: crypto.randomUUID(),
   kind: "projekt",
   projectId: "",
+  title: "",
   startTime: "07:00",
   endTime: "16:00",
   notizen: "",
@@ -119,6 +123,7 @@ export function AssignmentPopover({
           id: assignment.id,
           kind: assignment.kind || "projekt",
           projectId: assignment.project_id || "",
+          title: assignment.title || "",
           startTime: assignment.start_time || "07:00",
           endTime: assignment.end_time || "16:00",
           notizen: assignment.notizen || "",
@@ -255,11 +260,17 @@ export function AssignmentPopover({
         setSaving(false);
         return;
       }
+      if (b.kind === "regie" && !b.title.trim()) {
+        toast({ variant: "destructive", title: "Bezeichnung fehlt", description: "Bitte für Regie einen Namen eintragen." });
+        setSaving(false);
+        return;
+      }
       onAssign(
         profile.id,
         date,
         b.kind,
         b.kind === "regie" ? null : b.projectId,
+        b.title.trim() || null,
         b.notizen || undefined,
         b.startTime,
         b.endTime,
@@ -278,12 +289,20 @@ export function AssignmentPopover({
       return;
     }
 
+    const regieMissingTitle = validBlocks.find((b) => b.kind === "regie" && !b.title.trim());
+    if (regieMissingTitle) {
+      toast({ variant: "destructive", title: "Bezeichnung fehlt", description: "Bitte für jeden Regie-Block einen Namen eintragen." });
+      setSaving(false);
+      return;
+    }
+
     if (onAssignBatch) {
       const dates = isRangeMode ? days! : [date];
       const uids = [profile.id, ...additionalUserIds];
       const batchBlocks: BatchBlock[] = validBlocks.map((b) => ({
         kind: b.kind,
         projectId: b.kind === "regie" ? null : b.projectId,
+        title: b.title.trim() || null,
         startTime: b.startTime,
         endTime: b.endTime,
         notizen: b.notizen,
@@ -400,8 +419,17 @@ export function AssignmentPopover({
                     </SelectContent>
                   </Select>
                 ) : (
-                  <div className="rounded-md border border-dashed border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-900">
-                    Regiearbeit (Service ohne Projektzuordnung) — Details bitte in der Notiz erfassen.
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">
+                      Bezeichnung <span className="text-destructive font-normal">*</span>
+                    </Label>
+                    <Input
+                      value={b.title}
+                      onChange={(e) => updateBlock(b.id, "title", e.target.value)}
+                      placeholder="z.B. Wartung Müller, Service Schule, Reparatur Heizung…"
+                      className="h-10"
+                      required
+                    />
                   </div>
                 )}
 

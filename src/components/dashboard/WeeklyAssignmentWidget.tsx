@@ -66,7 +66,7 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
           sb
             .from("worker_assignments")
             .select(
-              "id, datum, project_id, kind, notizen, start_time, end_time, projects:project_id(name)"
+              "id, datum, project_id, kind, title, notizen, start_time, end_time, projects:project_id(name)"
             )
             .eq("user_id", userId)
             .gte("datum", fromDate)
@@ -94,7 +94,9 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
           kind: (a.kind as "projekt" | "regie") || "projekt",
           project_id: a.project_id,
           project_name:
-            a.kind === "regie" ? "Regie" : a.projects?.name || "–",
+            a.kind === "regie"
+              ? a.title?.trim() || "Regie"
+              : a.projects?.name || "–",
           notizen: a.notizen ?? null,
           start_time: a.start_time,
           end_time: a.end_time,
@@ -205,31 +207,45 @@ export function WeeklyAssignmentWidget({ userId }: Props) {
                       const containerCls = isRegie
                         ? "bg-orange-100 text-orange-900 border-orange-300"
                         : `${color?.bg} ${color?.text} ${color?.border}`;
+                      const firstPhoto = a.photos[0];
+                      const extraPhotos = a.photos.length - 1;
                       return (
                         <div
                           key={a.id}
-                          className={`relative rounded-md ${containerCls} text-[10px] px-1 py-2 border`}
+                          className={`relative rounded-md ${containerCls} text-[10px] border overflow-hidden`}
                         >
-                          <div className="flex items-center justify-center gap-1 truncate">
-                            {isRegie && <Wrench className="h-2.5 w-2.5" />}
-                            <span className="truncate">{a.project_name}</span>
-                          </div>
-                          {a.notizen && (
-                            <div className="text-[9px] opacity-75 mt-0.5 break-words whitespace-normal leading-tight">
-                              {a.notizen}
-                            </div>
-                          )}
-                          {a.photos.length > 0 && (
+                          {firstPhoto && (
                             <button
                               type="button"
                               onClick={() => openPhotos(a)}
-                              className="absolute right-1 top-1 inline-flex items-center gap-0.5 rounded bg-white/90 px-1 py-0.5 text-[9px] font-medium text-foreground shadow-sm hover:bg-white"
+                              className="relative block w-full aspect-[16/10] bg-black/5 overflow-hidden"
                               title={`${a.photos.length} Foto(s) ansehen`}
                             >
-                              <ImageIcon className="h-2.5 w-2.5" />
-                              {a.photos.length}
+                              <img
+                                src={photoUrl(firstPhoto.file_path)}
+                                alt={firstPhoto.file_name}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                              {extraPhotos > 0 && (
+                                <span className="absolute right-1 top-1 inline-flex items-center gap-0.5 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                  <ImageIcon className="h-2.5 w-2.5" />
+                                  +{extraPhotos}
+                                </span>
+                              )}
                             </button>
                           )}
+                          <div className="px-1 py-2">
+                            <div className="flex items-center justify-center gap-1 truncate">
+                              {isRegie && <Wrench className="h-2.5 w-2.5" />}
+                              <span className="truncate">{a.project_name}</span>
+                            </div>
+                            {a.notizen && (
+                              <div className="text-[9px] opacity-75 mt-0.5 break-words whitespace-normal leading-tight">
+                                {a.notizen}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })

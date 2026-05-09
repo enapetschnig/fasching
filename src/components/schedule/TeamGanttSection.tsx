@@ -231,7 +231,7 @@ export function TeamGanttSection({
                           const isEditable =
                             isRegie || canEditProject(a.project_id || "");
                           const projectName = isRegie
-                            ? "Regie"
+                            ? a.title?.trim() || "Regie"
                             : projectMap[a.project_id || ""] || "–";
                           const timeLabel = a.start_time && a.end_time
                             ? ` ${a.start_time.slice(0, 5)}–${a.end_time.slice(0, 5)}`

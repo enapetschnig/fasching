@@ -112,6 +112,7 @@ export default function ScheduleBoard() {
     _date: Date,
     kind: AssignmentKind,
     projectId: string | null,
+    title: string | null,
     notizen?: string,
     startTime?: string,
     endTime?: string,
@@ -120,6 +121,7 @@ export default function ScheduleBoard() {
     const payload = {
       kind,
       project_id: kind === "regie" ? null : projectId,
+      title: title,
       notizen: notizen ?? null,
       start_time: startTime || "07:00",
       end_time: endTime || "16:00",
@@ -148,6 +150,7 @@ export default function ScheduleBoard() {
     blocks: Array<{
       kind: AssignmentKind;
       projectId: string | null;
+      title: string | null;
       startTime: string;
       endTime: string;
       notizen: string;
@@ -170,6 +173,7 @@ export default function ScheduleBoard() {
             created_by: userId,
             kind: b.kind,
             project_id: b.kind === "regie" ? null : b.projectId,
+            title: b.title,
             start_time: b.startTime || "07:00",
             end_time: b.endTime || "16:00",
             notizen: b.notizen?.trim() || null,
